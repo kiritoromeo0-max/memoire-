@@ -473,92 +473,103 @@ const INTENTIONS: Array<{ libelle: string; description: string }> = [
 ];
 
 async function main() {
-  console.log("🧹 Nettoyage de la base...");
-  await db.apprentissageNlu.deleteMany();
-  await db.feedback.deleteMany();
-  await db.demandeConseiller.deleteMany();
-  await db.recommandation.deleteMany();
-  await db.interaction.deleteMany();
-  await db.session.deleteMany();
-  await db.questionRiasec.deleteMany();
-  await db.intention.deleteMany();
-  await db.filiereMetier.deleteMany();
-  await db.metier.deleteMany();
-  await db.utilisateur.deleteMany();
-  await db.filiere.deleteMany();
-
-  console.log("📌 Création des intentions...");
+  console.log("📌 Synchronisation des intentions...");
   for (const it of INTENTIONS) {
-    await db.intention.create({ data: { libelle: it.libelle, description: it.description } });
-  }
-
-  console.log("❓ Création des questions RIASEC...");
-  for (const q of RIASEC_QUESTIONS) {
-    await db.questionRiasec.create({
-      data: { dimension: q.dimension, ordre: q.ordre, enonce: q.enonce },
+    await db.intention.upsert({
+      where: { libelle: it.libelle },
+      create: { libelle: it.libelle, description: it.description },
+      update: { description: it.description },
     });
   }
 
-  console.log("🎓 Création des filières...");
+  console.log("❓ Synchronisation des questions RIASEC...");
+  for (const q of RIASEC_QUESTIONS) {
+    const data = { dimension: q.dimension, ordre: q.ordre, enonce: q.enonce };
+    const existing = await db.questionRiasec.findFirst({
+      where: { dimension: q.dimension, ordre: q.ordre },
+      select: { id: true },
+    });
+    if (existing) {
+      await db.questionRiasec.update({ where: { id: existing.id }, data });
+    } else {
+      await db.questionRiasec.create({ data });
+    }
+  }
+
+  console.log("🎓 Synchronisation des filières...");
   const filiereByName: Record<string, string> = {};
   for (const f of FILIERES) {
     const pc = PROS_CONS[f.nom] ?? { avF: [], incF: [], avM: [], incM: [], avP: [], incP: [], conseils: [] };
-    const created = await db.filiere.create({
-      data: {
-        nom: f.nom,
-        description: f.description,
-        profilRealiste: f.profil.R,
-        profilInvestigateur: f.profil.I,
-        profilArtistique: f.profil.A,
-        profilSocial: f.profil.S,
-        profilEntreprenant: f.profil.E,
-        profilConventionnel: f.profil.C,
-        conditionsAcces: f.conditionsAcces,
-        etablissementsDisponibles: f.etablissements.join(" | "),
-        duree: f.duree,
-        debouchesText: f.debouches,
-        domaines: f.domaines.join("|"),
-        avantagesFinanciers: pc.avF.join("|"),
-        inconvenientsFinanciers: pc.incF.join("|"),
-        avantagesMentaux: pc.avM.join("|"),
-        inconvenientsMentaux: pc.incM.join("|"),
-        avantagesPhysiques: pc.avP.join("|"),
-        inconvenientsPhysiques: pc.incP.join("|"),
-        conseils: pc.conseils.join("|"),
-      },
+    const data = {
+      nom: f.nom,
+      description: f.description,
+      profilRealiste: f.profil.R,
+      profilInvestigateur: f.profil.I,
+      profilArtistique: f.profil.A,
+      profilSocial: f.profil.S,
+      profilEntreprenant: f.profil.E,
+      profilConventionnel: f.profil.C,
+      conditionsAcces: f.conditionsAcces,
+      etablissementsDisponibles: f.etablissements.join(" | "),
+      duree: f.duree,
+      debouchesText: f.debouches,
+      domaines: f.domaines.join("|"),
+      avantagesFinanciers: pc.avF.join("|"),
+      inconvenientsFinanciers: pc.incF.join("|"),
+      avantagesMentaux: pc.avM.join("|"),
+      inconvenientsMentaux: pc.incM.join("|"),
+      avantagesPhysiques: pc.avP.join("|"),
+      inconvenientsPhysiques: pc.incP.join("|"),
+      conseils: pc.conseils.join("|"),
+    };
+    const existing = await db.filiere.findFirst({
+      where: { nom: f.nom },
+      select: { id: true },
     });
+    const created = existing
+      ? await db.filiere.update({ where: { id: existing.id }, data })
+      : await db.filiere.create({ data });
     filiereByName[f.nom] = created.id;
   }
 
-  console.log("💼 Création des métiers...");
+  console.log("💼 Synchronisation des métiers...");
   const metierByName: Record<string, string> = {};
   for (const m of METIERS) {
-    const created = await db.metier.create({
-      data: {
-        nom: m.nom,
-        description: m.description,
-        profilRealiste: m.profil.R,
-        profilInvestigateur: m.profil.I,
-        profilArtistique: m.profil.A,
-        profilSocial: m.profil.S,
-        profilEntreprenant: m.profil.E,
-        profilConventionnel: m.profil.C,
-        secteurActivite: m.secteur,
-        descriptionDebouches: m.debouches,
-        salaireMoyen: m.salaire,
-        competencesCles: m.competences.join("|"),
-        niveauMinimum: m.niveauMinimum,
-      },
+    const data = {
+      nom: m.nom,
+      description: m.description,
+      profilRealiste: m.profil.R,
+      profilInvestigateur: m.profil.I,
+      profilArtistique: m.profil.A,
+      profilSocial: m.profil.S,
+      profilEntreprenant: m.profil.E,
+      profilConventionnel: m.profil.C,
+      secteurActivite: m.secteur,
+      descriptionDebouches: m.debouches,
+      salaireMoyen: m.salaire,
+      competencesCles: m.competences.join("|"),
+      niveauMinimum: m.niveauMinimum,
+    };
+    const existing = await db.metier.findFirst({
+      where: { nom: m.nom },
+      select: { id: true },
     });
+    const created = existing
+      ? await db.metier.update({ where: { id: existing.id }, data })
+      : await db.metier.create({ data });
     metierByName[m.nom] = created.id;
   }
 
-  console.log("🔗 Création des liens filière ↔ métier...");
+  console.log("🔗 Synchronisation des liens filière ↔ métier...");
   for (const [fNom, mNom] of FILIERE_METIER_LINKS) {
     const fId = filiereByName[fNom];
     const mId = metierByName[mNom];
     if (fId && mId) {
-      await db.filiereMetier.create({ data: { filiereId: fId, metierId: mId } });
+      await db.filiereMetier.upsert({
+        where: { filiereId_metierId: { filiereId: fId, metierId: mId } },
+        create: { filiereId: fId, metierId: mId },
+        update: {},
+      });
     }
   }
 
