@@ -107,7 +107,33 @@ export async function consumeRateLimit(
     }
   }
 
-  if (process.env.NODE_ENV === "production") return { allowed: false, status: 503 };
+  if (process.env.NODE_ENV === "production") {
+    try {
+      const storageKey = crypto.createHash("sha256").update(key).digest("hex");
+      const [bucket] = await db.$queryRaw<{ count: number }[]>`
+        INSERT INTO "rate_limit_bucket" ("key", "count", "reset_at")
+        VALUES (${storageKey}, 1, NOW() + (${windowMs} * INTERVAL '1 millisecond'))
+        ON CONFLICT ("key") DO UPDATE SET
+          "count" = CASE
+            WHEN "rate_limit_bucket"."reset_at" <= NOW() THEN 1
+            ELSE "rate_limit_bucket"."count" + 1
+          END,
+          "reset_at" = CASE
+            WHEN "rate_limit_bucket"."reset_at" <= NOW()
+              THEN NOW() + (${windowMs} * INTERVAL '1 millisecond')
+            ELSE "rate_limit_bucket"."reset_at"
+          END
+        RETURNING "count"
+      `;
+      return bucket.count <= limit ? { allowed: true } : { allowed: false, status: 429 };
+    } catch (error) {
+      console.error(
+        "[rate-limit] PostgreSQL request failed",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+      return { allowed: false, status: 503 };
+    }
+  }
 
   const now = Date.now();
   const bucket = rateLimitBuckets.get(key);
