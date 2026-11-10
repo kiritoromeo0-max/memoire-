@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { analyserMessage, type NluContext } from "@/lib/orientation/nlu";
+import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser, requireOwnedSession } from "@/lib/anonymous-auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,14 +30,56 @@ export async function POST(req: NextRequest) {
       intentionCorrecte?: string;
     };
 
-    if (!messageUtilisateur || typeof note !== "number") {
+    if (
+      typeof messageUtilisateur !== "string" || messageUtilisateur.trim().length === 0 || messageUtilisateur.length > 4_000
+      || typeof reponseBot !== "string" || reponseBot.length > 8_000
+      || (note !== 1 && note !== -1)
+      || (correction != null && (typeof correction !== "string" || correction.length > 4_000))
+      || (intentionCorrecte != null && (typeof intentionCorrecte !== "string" || intentionCorrecte.length > 100))
+      || (intentionDetectee != null && (typeof intentionDetectee !== "string" || intentionDetectee.length > 100))
+      || (sessionId != null && (typeof sessionId !== "string" || sessionId.length > 100))
+      || (utilisateurId != null && (typeof utilisateurId !== "string" || utilisateurId.length > 100))
+      || (interactionId != null && (typeof interactionId !== "string" || interactionId.length > 100))
+    ) {
       return NextResponse.json({ error: "messageUtilisateur et note requis" }, { status: 400 });
     }
+
+    const auth = await requireAuthenticatedUser(req, utilisateurId ?? null);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+    const limit = await consumeRateLimit(`feedback:${auth.userId}`, 20, 60_000);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Trop de feedbacks. Réessayez plus tard.");
+    }
+
+    if (sessionId) {
+      const sessionAuth = await requireOwnedSession(req, sessionId, utilisateurId ?? auth.userId);
+      if (!sessionAuth.ok) {
+        return NextResponse.json({ error: sessionAuth.error }, { status: sessionAuth.status });
+      }
+    }
+
+    if (interactionId) {
+      const interaction = await db.interaction.findUnique({
+        where: { id: interactionId },
+        select: { sessionId: true },
+      });
+      if (!interaction) {
+        return NextResponse.json({ error: "Interaction non autorisée" }, { status: 403 });
+      }
+      const sessionAuth = await requireOwnedSession(req, interaction.sessionId, auth.userId);
+      if (!sessionAuth.ok || (sessionId && sessionId !== interaction.sessionId)) {
+        return NextResponse.json({ error: "Interaction non autorisée" }, { status: 403 });
+      }
+    }
+
+    const effectiveUserId = auth.userId;
 
     // 1. Enregistrer le feedback
     const feedback = await db.feedback.create({
       data: {
-        utilisateurId: utilisateurId ?? null,
+        utilisateurId: effectiveUserId,
         sessionId: sessionId ?? null,
         interactionId: interactionId ?? null,
         messageUtilisateur,
@@ -116,7 +159,12 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const utilisateurId = searchParams.get("utilisateurId");
-  const where = utilisateurId ? { utilisateurId } : {};
+  const auth = await requireAuthenticatedUser(req, utilisateurId);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const where = { utilisateurId: auth.userId };
   const feedbacks = await db.feedback.findMany({
     where,
     orderBy: { dateFeedback: "desc" },

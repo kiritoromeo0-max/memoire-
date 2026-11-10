@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { CONSEILLER_CONTACTS } from "@/lib/orientation/conseiller-contacts";
 
 interface Props {
   open: boolean;
@@ -72,10 +73,37 @@ export function CounselorDialog({ open, onOpenChange, utilisateurId, sessionId }
         <DialogHeader>
           <DialogTitle>Mise en relation avec un conseiller humain</DialogTitle>
           <DialogDescription>
-            Un conseiller d'orientation du CIO vous rappellera sous 48h ouvrées. Vos informations restent confidentielles.
+            Le formulaire enregistre votre demande dans OriensCI, mais ne déclenche pas de rappel automatique. Pour joindre directement un service, utilisez les coordonnées ci-dessous.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          <section aria-label="Coordonnées des services d'orientation" className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+            {[CONSEILLER_CONTACTS.dob, CONSEILLER_CONTACTS.cio].map((service) => (
+              <div key={service.nom} className="space-y-1">
+                <h3 className="font-semibold">{service.nom}</h3>
+                <p className="text-xs text-muted-foreground">{service.adresse}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {service.telephones.map((telephone) => (
+                    <a
+                      key={telephone}
+                      href={`tel:${telephone.replaceAll(" ", "")}`}
+                      className="text-xs font-medium text-primary underline underline-offset-2"
+                    >
+                      {telephone}
+                    </a>
+                  ))}
+                </div>
+                <a
+                  href={service.source}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-muted-foreground underline underline-offset-2"
+                >
+                  Source des coordonnées
+                </a>
+              </div>
+            ))}
+          </section>
           <div className="space-y-2">
             <Label htmlFor="cnom">Nom (optionnel)</Label>
             <Input id="cnom" value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Votre nom" />

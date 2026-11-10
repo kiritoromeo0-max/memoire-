@@ -3,14 +3,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { RIASEC_DIMENSIONS, type RiasecDimension } from "@/lib/orientation/riasec-constants";
+import { requireAuthenticatedUser } from "@/lib/anonymous-auth";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const utilisateurId = searchParams.get("utilisateurId");
-  if (!utilisateurId) return NextResponse.json({ error: "utilisateurId requis" }, { status: 400 });
+
+  const auth = await requireAuthenticatedUser(req, utilisateurId);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
 
   const utilisateur = await db.utilisateur.findUnique({
-    where: { id: utilisateurId },
+    where: { id: auth.userId },
     select: {
       profilDominant: true,
       scoreRealiste: true,
@@ -25,7 +30,7 @@ export async function GET(req: NextRequest) {
   if (!utilisateur) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
 
   const sessions = await db.session.findMany({
-    where: { utilisateurId },
+    where: { utilisateurId: auth.userId },
     select: {
       id: true,
       statut: true,

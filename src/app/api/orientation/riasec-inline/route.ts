@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculerScoresRiasecDepuisReponses } from "@/lib/orientation/llm-service";
 import { RIASEC_DIMENSIONS } from "@/lib/orientation/riasec-constants";
+import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser } from "@/lib/anonymous-auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,14 +13,27 @@ export async function POST(req: NextRequest) {
       reponses: Record<number, number>;
     };
 
-    if (!utilisateurId || !reponses) {
+    const auth = await requireAuthenticatedUser(req, utilisateurId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+    const limit = await consumeRateLimit(`riasec-inline:${auth.userId}`, 10, 60_000);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Trop de tests RIASEC. Réessayez plus tard.");
+    }
+
+    if (
+      !reponses || typeof reponses !== "object" || Array.isArray(reponses)
+      || Object.keys(reponses).length > 30
+      || Object.values(reponses).some((value) => !Number.isInteger(value) || value < 0 || value > 4)
+    ) {
       return NextResponse.json(
         { error: "utilisateurId et reponses requis" },
         { status: 400 }
       );
     }
 
-    const result = await calculerScoresRiasecDepuisReponses(utilisateurId, reponses);
+    const result = await calculerScoresRiasecDepuisReponses(auth.userId, reponses);
 
     return NextResponse.json({
       scores: result.scores,

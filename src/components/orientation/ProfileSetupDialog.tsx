@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,12 +14,18 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import type { Filiere, Utilisateur } from "@/lib/orientation/types";
+import {
+  SERIES_TERMINALE_GENERALES,
+  SERIES_TERMINALE_TECHNOLOGIQUES,
+} from "@/lib/orientation/education";
 
 const NIVEAUX = [
   { value: "Terminale", label: "Terminale" },
@@ -45,23 +51,35 @@ interface Props {
   onSaved: (u: Utilisateur) => void;
 }
 
-export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, onSaved }: Props) {
-  const [niveau, setNiveau] = useState<string>("");
-  const [filiereId, setFiliereId] = useState<string>("__aucune__");
-  const [localisation, setLocalisation] = useState<string>("");
-  const [saving, setSaving] = useState(false);
+function buildProfileState(utilisateur: Utilisateur | null) {
+  return {
+    niveau: utilisateur?.niveauEtudes ?? "",
+    filiereId: utilisateur?.filiereActuelleId ?? "__aucune__",
+    serieTerminale: utilisateur?.serieTerminale ?? "",
+    localisation: utilisateur?.localisation ?? "",
+  };
+}
 
-  useEffect(() => {
-    if (utilisateur) {
-      setNiveau(utilisateur.niveauEtudes ?? "");
-      setFiliereId(utilisateur.filiereActuelleId ?? "__aucune__");
-      setLocalisation(utilisateur.localisation ?? "");
-    } else {
-      setNiveau("");
-      setFiliereId("__aucune__");
-      setLocalisation("");
-    }
-  }, [utilisateur, open]);
+export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, onSaved }: Props) {
+  return (
+    <ProfileSetupDialogForm
+      key={`${open ? "open" : "closed"}-${utilisateur?.id ?? "new"}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      utilisateur={utilisateur}
+      filieres={filieres}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function ProfileSetupDialogForm({ open, onOpenChange, utilisateur, filieres, onSaved }: Props) {
+  const initialProfile = buildProfileState(utilisateur);
+  const [niveau, setNiveau] = useState<string>(initialProfile.niveau);
+  const [filiereId, setFiliereId] = useState<string>(initialProfile.filiereId);
+  const [serieTerminale, setSerieTerminale] = useState<string>(initialProfile.serieTerminale);
+  const [localisation, setLocalisation] = useState<string>(initialProfile.localisation);
+  const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     if (!utilisateur) return;
@@ -73,7 +91,8 @@ export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, 
         body: JSON.stringify({
           id: utilisateur.id,
           niveauEtudes: niveau || null,
-          filiereActuelleId: filiereId === "__aucune__" ? null : filiereId,
+          serieTerminale: niveau === "Terminale" ? serieTerminale || null : null,
+          filiereActuelleId: niveau === "Terminale" || filiereId === "__aucune__" ? null : filiereId,
           localisation: localisation || null,
         }),
       });
@@ -101,7 +120,14 @@ export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
             <Label htmlFor="niveau">Niveau d'études actuel</Label>
-            <Select value={niveau} onValueChange={setNiveau}>
+            <Select
+              value={niveau}
+              onValueChange={(value) => {
+                setNiveau(value);
+                if (value === "Terminale") setFiliereId("__aucune__");
+                else setSerieTerminale("");
+              }}
+            >
               <SelectTrigger id="niveau"><SelectValue placeholder="Sélectionnez votre niveau" /></SelectTrigger>
               <SelectContent>
                 {NIVEAUX.map((n) => <SelectItem key={n.value} value={n.value}>{n.label}</SelectItem>)}
@@ -109,16 +135,39 @@ export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, 
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="filiere">Filière actuelle (si applicable)</Label>
-            <Select value={filiereId} onValueChange={setFiliereId}>
-              <SelectTrigger id="filiere"><SelectValue placeholder="Aucune / non définie" /></SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value="__aucune__">Aucune / non définie</SelectItem>
-                {filieres.map((f) => <SelectItem key={f.id} value={f.id}>{f.nom}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          {niveau === "Terminale" ? (
+            <div className="space-y-2">
+              <Label htmlFor="serie-terminale">Série de Terminale</Label>
+              <Select value={serieTerminale} onValueChange={setSerieTerminale}>
+                <SelectTrigger id="serie-terminale"><SelectValue placeholder="Sélectionnez votre série" /></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  <SelectGroup>
+                    <SelectLabel>Séries générales</SelectLabel>
+                    {SERIES_TERMINALE_GENERALES.map((serie) => (
+                      <SelectItem key={serie} value={serie}>{serie}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>Séries techniques et technologiques</SelectLabel>
+                    {SERIES_TERMINALE_TECHNOLOGIQUES.map((serie) => (
+                      <SelectItem key={serie} value={serie}>{serie}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="filiere">Filière actuelle (si applicable)</Label>
+              <Select value={filiereId} onValueChange={setFiliereId}>
+                <SelectTrigger id="filiere"><SelectValue placeholder="Aucune / non définie" /></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  <SelectItem value="__aucune__">Aucune / non définie</SelectItem>
+                  {filieres.map((f) => <SelectItem key={f.id} value={f.id}>{f.nom}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="ville">Localisation (ville)</Label>
@@ -132,7 +181,7 @@ export function ProfileSetupDialog({ open, onOpenChange, utilisateur, filieres, 
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button onClick={handleSave} disabled={saving || !niveau}>
+          <Button onClick={handleSave} disabled={saving || !niveau || (niveau === "Terminale" && !serieTerminale)}>
             {saving ? "Enregistrement…" : "Enregistrer mon profil"}
           </Button>
         </DialogFooter>

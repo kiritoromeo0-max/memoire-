@@ -15,6 +15,13 @@ import {
   similariteRapide,
 } from "./recommendation";
 
+export class LlmServiceUnavailableError extends Error {
+  constructor() {
+    super("LLM provider is unavailable");
+    this.name = "LlmServiceUnavailableError";
+  }
+}
+
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
 async function getZai() {
@@ -73,7 +80,7 @@ export interface LlmResponse {
   profilMisAJour?: boolean;
   testProgress?: { current: number; total: number };
   sourcesWeb?: Array<{ titre: string; url: string; extrait: string }>;
-  scoresCalcules?: { scores: Record<string, number>; dominant: string; dominantLabel: string };
+  scoresCalcules?: { scores: Record<RiasecDimension, number>; dominant: RiasecDimension; dominantLabel: string };
 }
 
 // Build the system prompt with all context
@@ -81,6 +88,7 @@ function buildSystemPrompt(params: {
   utilisateur: {
     id: string;
     niveauEtudes: string | null;
+    serieTerminale?: string | null;
     filiereActuelle?: { nom: string } | null;
     filiereSouhaitee: string | null;
     localisation: string | null;
@@ -124,7 +132,7 @@ function buildSystemPrompt(params: {
 
 # CONTEXTE DE L'UTILISATEUR ACTUEL
 - Niveau d'études : ${utilisateur.niveauEtudes ?? "non renseigné"}
-- Filière actuelle : ${utilisateur.filiereActuelle?.nom ?? "non renseignée"}
+- Filière actuelle : ${utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "non renseignée"}
 - Filière souhaitée : ${utilisateur.filiereSouhaitee ?? "non renseignée"}
 - Localisation : ${utilisateur.localisation ?? "non renseignée"}
 - Test RIASEC passé : ${profilComplet ? "OUI" : "NON"}
@@ -459,10 +467,11 @@ export async function gererChatLlm(input: LlmChatInput): Promise<LlmResponse> {
     rawResponse = completion.choices?.[0]?.message?.content ?? "";
   } catch (e) {
     console.error("[LLM] erreur:", e);
-    return {
-      reponse: "Désolé, j'ai rencontré une erreur technique. Pouvez-vous reformuler votre message ?",
-      actions: [],
-    };
+    throw new LlmServiceUnavailableError();
+  }
+  if (!rawResponse.trim()) {
+    console.error("[LLM] réponse vide");
+    throw new LlmServiceUnavailableError();
   }
 
   const parsed = parseLlmResponse(rawResponse);

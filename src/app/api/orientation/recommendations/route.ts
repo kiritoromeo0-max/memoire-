@@ -1,23 +1,53 @@
 // /api/orientation/recommendations — recommandations personnalisées
-// GET ?utilisateurId=...&sessionId=... : génère (ou régénère) des recommandations
+// POST { utilisateurId, sessionId? } : génère (ou régénère) des recommandations
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { recommander, profilDominant } from "@/lib/orientation/recommendation";
-import { RIASEC_DIMENSIONS, RIASEC_KEYS, type RiasecDimension } from "@/lib/orientation/riasec-constants";
+import { RIASEC_DIMENSIONS, type RiasecDimension } from "@/lib/orientation/riasec-constants";
+import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser, requireOwnedSession } from "@/lib/anonymous-auth";
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const utilisateurId = searchParams.get("utilisateurId");
-  const sessionId = searchParams.get("sessionId");
-  if (!utilisateurId) return NextResponse.json({ error: "utilisateurId requis" }, { status: 400 });
+export async function POST(req: NextRequest) {
+  let body: { utilisateurId?: unknown; sessionId?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Corps JSON invalide" }, { status: 400 });
+  }
+  const utilisateurId = typeof body.utilisateurId === "string" ? body.utilisateurId : null;
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
+  if (!utilisateurId || utilisateurId.length > 100 || (body.sessionId != null && (!sessionId || sessionId.length > 100))) {
+    return NextResponse.json({ error: "Identifiants invalides" }, { status: 400 });
+  }
+  const auth = await requireAuthenticatedUser(req, utilisateurId);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+  const userId = auth.userId;
+  const limit = await consumeRateLimit(`recommendations:${userId}`, 10, 60_000);
+  if (!limit.allowed) {
+    return rateLimitResponse(limit, "Trop de demandes. Réessayez plus tard.");
+  }
+  if (sessionId) {
+    const sessionOwnership = await requireOwnedSession(req, sessionId, utilisateurId ?? userId);
+    if (!sessionOwnership.ok) {
+      return NextResponse.json({ error: sessionOwnership.error }, { status: sessionOwnership.status });
+    }
+  }
 
   const utilisateur = await db.utilisateur.findUnique({
-    where: { id: utilisateurId },
+    where: { id: userId },
     include: { filiereActuelle: true },
   });
   if (!utilisateur) return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
 
-  const profilComplet = RIASEC_KEYS.some((k) => (utilisateur as unknown as Record<string, number>)[`score${RIASEC_DIMENSIONS[k as RiasecDimension].label}`] > 0);
+  const profilComplet = [
+    utilisateur.scoreRealiste,
+    utilisateur.scoreInvestigateur,
+    utilisateur.scoreArtistique,
+    utilisateur.scoreSocial,
+    utilisateur.scoreEntreprenant,
+    utilisateur.scoreConventionnel,
+  ].some((score) => score > 0);
   if (!profilComplet) {
     return NextResponse.json({
       error: "Profil RIASEC incomplet",
@@ -51,7 +81,7 @@ export async function GET(req: NextRequest) {
   let sessionIdFinal = sessionId;
   if (!sessionIdFinal) {
     const session = await db.session.create({
-      data: { utilisateurId, statut: "active" },
+      data: { utilisateurId: userId, statut: "active" },
     });
     sessionIdFinal = session.id;
   }

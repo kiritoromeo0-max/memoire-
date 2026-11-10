@@ -14,6 +14,7 @@ import {
   RIASEC_KEYS,
   type RiasecDimension,
 } from "./riasec-constants";
+import { CONSEILLER_CONTACTS } from "./conseiller-contacts";
 
 export interface DialogueInput {
   utilisateurId: string;
@@ -238,7 +239,6 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
     case "demarrage_profil": {
       reponseSysteme = "Parfait ! Configurons votre profil ensemble. Cliquez sur le bouton ci-dessous pour ouvrir le formulaire de profil.";
       actions = [
-        { type: "demarrage_profil", texte: reponseSysteme },
         { type: "demarrer_profil", texte: "Ouvrir le formulaire de profil" },
       ];
       break;
@@ -286,7 +286,7 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
       const dom = profilComplet ? profilDominant(profil) : null;
       const lignes: string[] = ["📊 **Votre profil OriensCI**", ""];
       lignes.push(`🔹 **Niveau d'études** : ${utilisateur.niveauEtudes ?? "non renseigné"}`);
-      lignes.push(`🔹 **Filière actuelle** : ${utilisateur.filiereActuelle?.nom ?? "non renseignée"}`);
+      lignes.push(`🔹 **Filière actuelle** : ${utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "non renseignée"}`);
       lignes.push(`🔹 **Localisation** : ${utilisateur.localisation ?? "non renseignée"}`);
       if (profilComplet) {
         lignes.push("");
@@ -565,13 +565,12 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
       reponseSysteme = [
         "🧑‍💼 **Mise en relation avec un conseiller humain**",
         "",
-        "Je comprends que votre demande nécessite un accompagnement humain personnalisé. Vous pouvez être rappelé(e) par un conseiller d'orientation du **CIO (Centre d'Information et d'Orientation)** de Côte d'Ivoire.",
+        "Pour un accompagnement humain, vous pouvez contacter directement les services d'orientation suivants :",
         "",
-        "📋 Pour cela, laissez vos coordonnées via le formulaire ci-dessous. Un conseiller vous contactera sous 48h ouvrées.",
+        `• **${CONSEILLER_CONTACTS.dob.nom}** — ${CONSEILLER_CONTACTS.dob.adresse} — ${CONSEILLER_CONTACTS.dob.telephones.join(" / ")}`,
+        `• **${CONSEILLER_CONTACTS.cio.nom}** — ${CONSEILLER_CONTACTS.cio.adresse} — ${CONSEILLER_CONTACTS.cio.telephones.join(" / ")}`,
         "",
-        "📞 Vous pouvez aussi contacter directement :",
-        "• Direction de l'Orientation Scolaire et Professionnelle (DOSP) — Ministère de l'Éducation Nationale",
-        "• CIO Abidjan Plateau : +225 27 20 21 00 00",
+        "Vous pouvez aussi laisser une demande via le formulaire. Elle sera enregistrée dans OriensCI, mais cette application ne déclenche pas de rappel automatique.",
       ].join("\n");
       actions = [
         { type: "redirection_conseiller", texte: reponseSysteme },

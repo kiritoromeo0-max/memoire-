@@ -29,10 +29,21 @@ export interface NluResult {
 
 // Dictionnaires de mots-clés par intention
 const KEYWORDS: Record<IntentLabel, string[]> = {
-  salutation: ["bonjour", "bonsoir", "salut", "coucou", "hello", "bon apr\u00e8s-midi", "enchante", "cc"],
+  salutation: [
+    "bonjour", "bonsoir", "salut", "coucou", "hello", "bon apr\u00e8s-midi", "enchante", "cc",
+    "comment allez-vous", "comment allez vous", "comment \u00e7a va", "comment ca va",
+    "comment vas-tu", "comment vas tu", "ca va",
+  ],
   remerciement: ["merci", "thanks", "super", "g\u00e9nial", "parfait", "nickel", "cool", "ok merci", "merci beaucoup"],
   demande_test_riasec: ["test", "riasec", "holland", "test d'int\u00e9r\u00eat", "test de personnalit\u00e9", "passer le test", "faire le test", "questionnaire"],
-  demande_recommandation: ["recommande", "recommandation", "conseille", "conseillez", "quel m\u00e9tier", "quelle filiere", "orienter", "orientation", "pour moi", "selon mon profil", "adapter", "adapte", "suggere", "sugg\u00e9rez", "propose"],
+  demande_recommandation: [
+    "recommande", "recommandation", "recommandations",
+    "recommandation personnalis\u00e9e", "recommandations personnalis\u00e9es",
+    "recommandations compl\u00e8tes", "mes recommandations",
+    "donnez-moi des recommandations", "je veux des recommandations",
+    "conseille", "conseillez", "quel m\u00e9tier", "quelle filiere", "orienter", "orientation",
+    "pour moi", "selon mon profil", "adapter", "adapte", "suggere", "sugg\u00e9rez", "propose",
+  ],
   demande_debouches: ["debouch\u00e9", "debouches", "d\u00e9bouch\u00e9", "d\u00e9bouch\u00e9s", "sortie", "sorties", "travailler apr\u00e8s", "m\u00e9tier apr\u00e8s", "que faire avec", "opportunit\u00e9", "opportunit\u00e9s", "emploi", "carri\u00e8re"],
   aide_conseiller: ["conseiller", "conseill\u00e8re", "humain", "agent", "personne r\u00e9elle", "parler \u00e0 quelqu'un", "orientateur", "psychologue", "sp\u00e9cialiste", "contact", "contacter", "humain svp"],
   consultation_profil: ["mon profil", "mes scores", "mes resultats", "mes r\u00e9sultats", "mon riasec", "mon test", "voir mon profil", "mon compte", "mon historique", "historique", "sessions pr\u00e9c\u00e9dentes", "mes sessions", "glossaire", "glossaire riasec", "explique riasec", "expliquez riasec", "mod\u00e8le de holland", "mod\u00e8le holland", "qu'est-ce que riasec", "comprendre riasec"],
@@ -52,6 +63,14 @@ const RIASEC_KEYWORDS: Record<RiasecDimension, string[]> = {
   C: ["organiser", "rigueur", "m\u00e9thode", "chiffre", "comptable", "donn\u00e9es", "classer", "structure", "proc\u00e9dure", "pr\u00e9cis", "compte"],
 };
 
+const CORRECTIONS_COURANTES: Record<string, string> = {
+  veu: "veux",
+  fair: "faire",
+  filier: "filiere",
+  informatik: "informatique",
+  oriantation: "orientation",
+};
+
 function normaliser(msg: string): string {
   return msg
     .toLowerCase()
@@ -59,7 +78,10 @@ function normaliser(msg: string): string {
     .replace(/[\u0300-\u036f]/g, "") // supprimer les accents
     .replace(/[^\p{L}\p{N}\s'-]/gu, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .split(" ")
+    .map((word) => CORRECTIONS_COURANTES[word] ?? word)
+    .join(" ");
 }
 
 // Compter les occurrences de mots-clés
@@ -116,16 +138,16 @@ function detecterEntiteNom<T extends { nom: string }>(
 // Détecter une dimension RIASEC mentionnée
 function detecterDimensionRiasec(messageNorm: string): RiasecDimension | undefined {
   let best: { dim: RiasecDimension; count: number } | null = null;
-  (Object.keys(RIASEC_KEYWORDS) as RiasecDimension[]).forEach((dim) => {
+  for (const dim of Object.keys(RIASEC_KEYWORDS) as RiasecDimension[]) {
     const { count } = compterOccurrences(messageNorm, RIASEC_KEYWORDS[dim]);
     if (count > 0 && (!best || count > best.count)) {
       best = { dim, count };
     }
-  });
+  }
   return best?.dim;
 }
 
-function detecterMotCleDomaine(messageNorm: string, domainesParFiliere: { filiereId: string; nom: string; domaines: string[] }[]): { filiereId: string; nom: string; mot: string } | null {
+function detecterMotCleDomaine(messageNorm: string, domainesParFiliere: { id: string; nom: string; domaines: string[] }[]): { filiereId: string; nom: string; mot: string } | null {
   let best: { filiereId: string; nom: string; mot: string; len: number } | null = null;
   for (const f of domainesParFiliere) {
     for (const d of f.domaines) {
@@ -133,7 +155,7 @@ function detecterMotCleDomaine(messageNorm: string, domainesParFiliere: { filier
       if (dNorm.length < 4) continue;
       if (messageNorm.includes(dNorm)) {
         if (!best || dNorm.length > best.len) {
-          best = { filiereId: f.filiereId, nom: f.nom, mot: d, len: dNorm.length };
+          best = { filiereId: f.id, nom: f.nom, mot: d, len: dNorm.length };
         }
       }
     }

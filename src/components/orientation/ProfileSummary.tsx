@@ -90,8 +90,8 @@ export function ProfileSummary({ utilisateur, onEditProfil, onPasserTest, onReco
           <div className="flex items-center gap-2">
             <BookOpen className="h-4 w-4 text-primary shrink-0" />
             <span className="text-muted-foreground text-xs">Filière</span>
-            <span className="ml-auto font-medium text-right text-[12px] max-w-[140px] truncate" title={utilisateur.filiereActuelle?.nom ?? ""}>
-              {utilisateur.filiereActuelle?.nom ?? "—"}
+            <span className="ml-auto font-medium text-right text-[12px] max-w-[140px] truncate" title={utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? ""}>
+              {utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "—"}
             </span>
           </div>
           <div className="flex items-center gap-2">

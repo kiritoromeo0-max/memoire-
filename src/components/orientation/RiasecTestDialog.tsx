@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,26 +34,33 @@ interface Props {
 }
 
 export function RiasecTestDialog({ open, onOpenChange, utilisateur, onCompleted }: Props) {
+  return (
+    <RiasecTestDialogForm
+      key={`${open ? "open" : "closed"}-${utilisateur?.id ?? "new"}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      utilisateur={utilisateur}
+      onCompleted={onCompleted}
+    />
+  );
+}
+
+function RiasecTestDialogForm({ open, onOpenChange, utilisateur, onCompleted }: Props) {
   const [current, setCurrent] = useState(0);
   const [reponses, setReponses] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setCurrent(0);
-      setReponses({});
-    }
-  }, [open]);
 
   const total = RIASEC_QUESTIONS.length;
   const q = RIASEC_QUESTIONS[current];
   const progress = ((current + (reponses[String(q.ordre)] !== undefined ? 1 : 0)) / total) * 100;
 
   function answer(val: number) {
+    const answeredQuestion = current;
     setReponses((prev) => ({ ...prev, [String(q.ordre)]: val }));
-    // avancer automatiquement après un court délai
     setTimeout(() => {
-      if (current < total - 1) setCurrent((c) => c + 1);
+      setCurrent((index) =>
+        index === answeredQuestion ? Math.min(index + 1, total - 1) : index
+      );
     }, 220);
   }
 
@@ -136,27 +143,31 @@ export function RiasecTestDialog({ open, onOpenChange, utilisateur, onCompleted 
             >
               ← Précédent
             </Button>
-            <div className="flex gap-1.5">
-              {RIASEC_ORDER.map((d) => {
-                const answered = RIASEC_QUESTIONS.filter(
-                  (qq) => qq.dimension === d && reponses[String(qq.ordre)] !== undefined
-                ).length;
-                const totalD = RIASEC_QUESTIONS.filter((qq) => qq.dimension === d).length;
-                return (
-                  <span
-                    key={d}
-                    className="text-[10px] font-mono px-1.5 py-0.5 rounded"
-                    style={{
-                      color: answered === totalD ? "#fff" : RIASEC_DIMENSIONS[d].couleur,
-                      background: answered === totalD ? RIASEC_DIMENSIONS[d].couleur : "transparent",
-                      border: `1px solid ${RIASEC_DIMENSIONS[d].couleur}`,
-                    }}
-                    title={RIASEC_DIMENSIONS[d].label}
-                  >
-                    {d} {answered}/{totalD}
-                  </span>
-                );
-              })}
+            <div className="space-y-1">
+              <p className="text-center text-[10px] text-muted-foreground">Questions répondues par dimension</p>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                {RIASEC_ORDER.map((d) => {
+                  const answered = RIASEC_QUESTIONS.filter(
+                    (qq) => qq.dimension === d && reponses[String(qq.ordre)] !== undefined
+                  ).length;
+                  const totalD = RIASEC_QUESTIONS.filter((qq) => qq.dimension === d).length;
+                  return (
+                    <span
+                      key={d}
+                      className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+                      style={{
+                        color: answered === totalD ? "#fff" : RIASEC_DIMENSIONS[d].couleur,
+                        background: answered === totalD ? RIASEC_DIMENSIONS[d].couleur : "transparent",
+                        border: `1px solid ${RIASEC_DIMENSIONS[d].couleur}`,
+                      }}
+                      title={`${RIASEC_DIMENSIONS[d].label} : ${answered} question${answered === 1 ? "" : "s"} répondue${answered === 1 ? "" : "s"} sur ${totalD}`}
+                      aria-label={`${RIASEC_DIMENSIONS[d].label} : ${answered} question${answered === 1 ? "" : "s"} répondue${answered === 1 ? "" : "s"} sur ${totalD}`}
+                    >
+                      {d} {answered}/{totalD}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
             {current < total - 1 ? (
               <Button

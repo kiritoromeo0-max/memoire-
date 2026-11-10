@@ -39,8 +39,8 @@ export function RiasecResultDialog({ open, onOpenChange, result, onRecommandatio
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden sm:max-w-[560px]">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Trophy className="h-5 w-5 text-accent-foreground" />
             Résultats du test RIASEC
@@ -50,7 +50,8 @@ export function RiasecResultDialog({ open, onOpenChange, result, onRecommandatio
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1 pr-1">
+          <div className="space-y-3">
           {/* Bandeau profil dominant */}
           <div
             className="rounded-lg p-3 text-center text-white"
@@ -127,10 +128,11 @@ export function RiasecResultDialog({ open, onOpenChange, result, onRecommandatio
                 </div>
               ))}
             </div>
-          </div>
+            </div>
+        </div>
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
+        <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-row">
           <Button variant="outline" size="sm" onClick={onRepasser} className="text-xs">
             <RotateCcw className="h-3.5 w-3.5 mr-1" /> Repasser
           </Button>

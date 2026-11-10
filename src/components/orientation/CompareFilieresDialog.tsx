@@ -32,9 +32,13 @@ export function CompareFilieresDialog({ open, onOpenChange, filieres }: Props) {
     if (!search.trim()) return filieres;
     const q = search.toLowerCase();
     return filieres.filter(
-      (f) =>
-        f.nom.toLowerCase().includes(q) ||
-        (f.domaines ?? []).some((d: string) => d.toLowerCase().includes(q))
+      (f) => {
+        const domaines = Array.isArray(f.domaines)
+          ? f.domaines
+          : f.domaines?.split("|").map((domaine) => domaine.trim()).filter(Boolean) ?? [];
+        return f.nom.toLowerCase().includes(q) ||
+          domaines.some((domaine) => domaine.toLowerCase().includes(q));
+      }
     );
   }, [filieres, search]);
 

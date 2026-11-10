@@ -9,6 +9,7 @@ import {
   type RiasecDimension,
 } from "@/lib/orientation/riasec-constants";
 import { recommander, profilDominant, similariteRapide } from "@/lib/orientation/recommendation";
+import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser, requireOwnedSession } from "@/lib/anonymous-auth";
 
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 async function getZai() {
@@ -19,13 +20,32 @@ async function getZai() {
 export async function POST(req: NextRequest) {
   try {
     const { utilisateurId, sessionId } = await req.json();
-    if (!utilisateurId) {
+    if (
+      typeof utilisateurId !== "string" || utilisateurId.length > 100
+      || (sessionId != null && (typeof sessionId !== "string" || sessionId.length > 100))
+    ) {
       return NextResponse.json({ error: "utilisateurId requis" }, { status: 400 });
+    }
+
+    const auth = await requireAuthenticatedUser(req, utilisateurId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+    const limit = await consumeRateLimit(`synthese:${auth.userId}`, 3, 60_000);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Trop de synthèses. Réessayez plus tard.");
+    }
+
+    if (sessionId) {
+      const ownership = await requireOwnedSession(req, sessionId, utilisateurId);
+      if (!ownership.ok) {
+        return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+      }
     }
 
     // Charger TOUT le profil utilisateur
     const utilisateur = await db.utilisateur.findUnique({
-      where: { id: utilisateurId },
+      where: { id: auth.userId },
       include: { filiereActuelle: true },
     });
     if (!utilisateur) {
@@ -110,7 +130,7 @@ FILIÈRE SOUHAITÉE PAR L'UTILISATEUR : "${filiereSouhaitee}"
 
 # PROFIL COMPLET DE L'UTILISATEUR
 - Niveau d'études : ${utilisateur.niveauEtudes ?? "non renseigné"}
-- Filière actuelle : ${utilisateur.filiereActuelle?.nom ?? "non renseignée"}
+- Filière actuelle : ${utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "non renseignée"}
 - Localisation : ${utilisateur.localisation ?? "non renseignée"}
 ${analyseSouhait}
 

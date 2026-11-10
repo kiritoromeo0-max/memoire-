@@ -10,15 +10,10 @@ import {
   type RiasecDimension,
 } from "@/lib/orientation/riasec-constants";
 import { profilDominant } from "@/lib/orientation/recommendation";
+import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser, toPublicUser } from "@/lib/anonymous-auth";
 
 export async function GET() {
-  // On renvoie la définition statique (plus riche que la table) + on s'assure que les questions existent en base
-  const count = await db.questionRiasec.count();
-  if (count === 0) {
-    await db.questionRiasec.createMany({
-      data: RIASEC_QUESTIONS.map((q) => ({ dimension: q.dimension, ordre: q.ordre, enonce: q.enonce })),
-    });
-  }
+  // La définition servie ici est statique; cette lecture ne modifie pas la base.
   return NextResponse.json({
     questions: RIASEC_QUESTIONS,
     dimensions: RIASEC_DIMENSIONS,
@@ -32,7 +27,20 @@ export async function POST(req: NextRequest) {
       utilisateurId: string;
       reponses: Record<string, number>; // questionId ou ordre -> valeur 0..4
     };
-    if (!utilisateurId || !reponses) {
+    const auth = await requireAuthenticatedUser(req, utilisateurId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+    const limit = await consumeRateLimit(`riasec:${auth.userId}`, 10, 60_000);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Trop de tests RIASEC. Réessayez plus tard.");
+    }
+
+    if (
+      !reponses || typeof reponses !== "object" || Array.isArray(reponses)
+      || Object.keys(reponses).length > RIASEC_QUESTIONS.length
+      || Object.values(reponses).some((value) => !Number.isInteger(value) || value < 0 || value > 4)
+    ) {
       return NextResponse.json({ error: "utilisateurId et reponses requis" }, { status: 400 });
     }
 
@@ -62,7 +70,7 @@ export async function POST(req: NextRequest) {
     };
 
     const utilisateur = await db.utilisateur.update({
-      where: { id: utilisateurId },
+      where: { id: auth.userId },
       data: dataUpdate,
       include: { filiereActuelle: true },
     });
@@ -73,7 +81,7 @@ export async function POST(req: NextRequest) {
       .slice(0, 3);
 
     return NextResponse.json({
-      utilisateur,
+      utilisateur: toPublicUser(utilisateur),
       scores,
       dominant: dom,
       dominantLabel: RIASEC_DIMENSIONS[dom].label,

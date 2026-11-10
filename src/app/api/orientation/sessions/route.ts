@@ -3,19 +3,27 @@
 // GET : liste les sessions d'un utilisateur (avec interactions)
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireAuthenticatedUser, requireOwnedSession } from "@/lib/anonymous-auth";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { utilisateurId } = body;
-    if (!utilisateurId) return NextResponse.json({ error: "utilisateurId requis" }, { status: 400 });
+    if (typeof utilisateurId !== "string" || utilisateurId.length > 100) {
+      return NextResponse.json({ error: "utilisateurId invalide" }, { status: 400 });
+    }
+    const auth = await requireAuthenticatedUser(req, utilisateurId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+    const userId = auth.userId;
     // Clôturer les sessions actives précédentes
     await db.session.updateMany({
-      where: { utilisateurId, statut: "active" },
+      where: { utilisateurId: userId, statut: "active" },
       data: { statut: "terminee", dateFin: new Date() },
     });
     const session = await db.session.create({
-      data: { utilisateurId, statut: "active" },
+      data: { utilisateurId: userId, statut: "active" },
     });
     return NextResponse.json(session, { status: 201 });
   } catch (e) {
@@ -28,7 +36,17 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const utilisateurId = searchParams.get("utilisateurId");
   const sessionId = searchParams.get("sessionId");
+
+  const auth = await requireAuthenticatedUser(req, utilisateurId);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   if (sessionId) {
+    const ownership = await requireOwnedSession(req, sessionId, utilisateurId ?? auth.userId);
+    if (!ownership.ok) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
     const session = await db.session.findUnique({
       where: { id: sessionId },
       include: {
@@ -39,9 +57,9 @@ export async function GET(req: NextRequest) {
     if (!session) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
     return NextResponse.json(session);
   }
-  if (!utilisateurId) return NextResponse.json({ error: "utilisateurId requis" }, { status: 400 });
+
   const sessions = await db.session.findMany({
-    where: { utilisateurId },
+    where: { utilisateurId: auth.userId },
     orderBy: { dateDebut: "desc" },
     include: { _count: { select: { interactions: true, recommandations: true } } },
   });

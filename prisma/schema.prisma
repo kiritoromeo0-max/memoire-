@@ -13,7 +13,10 @@ datasource db {
 /// RG1 : un utilisateur a zéro ou une filière actuelle ; une filière peut concerner plusieurs utilisateurs.
 model Utilisateur {
   id                   String      @id @default(cuid())
+  anonymousTokenHash   String? @unique @map("anonymousToken")
+  anonymousTokenExpiresAt DateTime?
   niveauEtudes         String?     // Terminale, Licence 1, Licence 2, Licence 3, etc.
+  serieTerminale       String?
   filiereActuelleId    String?     // RG1
   filiereSouhaitee     String?     // filière exprimée par l'utilisateur (avant test)
   // Scores RIASEC (6 dimensions)

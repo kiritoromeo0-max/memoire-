@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -84,23 +84,32 @@ const QUESTIONS = [
   },
 ];
 
-export function PersonalityQuestionnaire({ open, onOpenChange, utilisateur, onSaved }: Props) {
-  const [current, setCurrent] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
+function buildAnswers(utilisateur: Utilisateur | null): Record<string, string> {
+  return {
+    ambition: utilisateur?.ambition?.toString() ?? "",
+    rythme: utilisateur?.rythme?.toString() ?? "",
+    autonomie: utilisateur?.autonomie?.toString() ?? "",
+    styleTravail: utilisateur?.styleTravail ?? "",
+    toleranceStress: utilisateur?.toleranceStress?.toString() ?? "",
+  };
+}
 
-  useEffect(() => {
-    if (open && utilisateur) {
-      setCurrent(0);
-      setAnswers({
-        ambition: utilisateur.ambition?.toString() ?? "",
-        rythme: utilisateur.rythme?.toString() ?? "",
-        autonomie: utilisateur.autonomie?.toString() ?? "",
-        styleTravail: utilisateur.styleTravail ?? "",
-        toleranceStress: utilisateur.toleranceStress?.toString() ?? "",
-      });
-    }
-  }, [open, utilisateur]);
+export function PersonalityQuestionnaire({ open, onOpenChange, utilisateur, onSaved }: Props) {
+  return (
+    <PersonalityQuestionnaireForm
+      key={`${open ? "open" : "closed"}-${utilisateur?.id ?? "new"}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      utilisateur={utilisateur}
+      onSaved={onSaved}
+    />
+  );
+}
+
+function PersonalityQuestionnaireForm({ open, onOpenChange, utilisateur, onSaved }: Props) {
+  const [current, setCurrent] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string>>(() => buildAnswers(utilisateur));
+  const [saving, setSaving] = useState(false);
 
   const total = QUESTIONS.length;
   const q = QUESTIONS[current];

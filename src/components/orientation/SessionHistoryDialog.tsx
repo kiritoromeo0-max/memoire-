@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -94,12 +94,13 @@ export function SessionHistoryDialog({ open, onOpenChange, utilisateurId }: Prop
     }
   }, []);
 
-  useEffect(() => {
-    if (open) {
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
       setSelectedSession(null);
-      loadSessions();
+      void loadSessions();
     }
-  }, [open, loadSessions]);
+    onOpenChange(nextOpen);
+  };
 
   function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString("fr-FR", {
@@ -112,7 +113,7 @@ export function SessionHistoryDialog({ open, onOpenChange, utilisateurId }: Prop
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[640px] max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,7 @@ import {
   Bot,
   Globe,
 } from "lucide-react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/app/providers";
 import { toast } from "sonner";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { ProfileSetupDialog } from "./ProfileSetupDialog";
@@ -52,6 +53,7 @@ import { StatsCard } from "./StatsCard";
 import { RiasecGlossaryDialog } from "./RiasecGlossaryDialog";
 import { FeedbackButtons } from "./FeedbackButtons";
 import { PersonalityQuestionnaire } from "./PersonalityQuestionnaire";
+import type { LlmResponse } from "@/lib/orientation/llm-service";
 import {
   RIASEC_DIMENSIONS,
   RIASEC_ORDER,
@@ -80,6 +82,42 @@ interface TestResult {
 const STORAGE_KEY = "oriensci_ctx_v1";
 
 interface StoredCtx { utilisateurId: string; sessionId: string; }
+
+async function getChatRequestError(response: Response): Promise<Error> {
+  let code: string | undefined;
+  try {
+    const body: unknown = await response.json();
+    if (body && typeof body === "object" && "code" in body && typeof body.code === "string") {
+      code = body.code;
+    }
+  } catch {
+    // Use the HTTP status when the server does not return a JSON error body.
+  }
+
+  switch (response.status) {
+    case 400:
+      return new Error("Le message est invalide ou dépasse la longueur autorisée.");
+    case 401:
+      return new Error("Votre session a expiré. Rechargez la page pour reprendre la conversation.");
+    case 403:
+      if (code === "ORIGIN_NOT_ALLOWED") {
+        return new Error("La requête a été bloquée car son origine n'est pas autorisée.");
+      }
+      return new Error("Cette session n'est pas autorisée. Rechargez la page puis réessayez.");
+    case 429:
+      return new Error("Vous avez envoyé trop de messages. Attendez un peu avant de réessayer.");
+    case 503:
+      if (code === "RATE_LIMIT_UNAVAILABLE") {
+        return new Error("La protection est temporairement indisponible. Réessayez plus tard.");
+      }
+      if (code === "AI_UNAVAILABLE") {
+        return new Error("Le service IA est temporairement indisponible. Vous pouvez activer le mode classique.");
+      }
+      return new Error("Un service est temporairement indisponible. Réessayez plus tard.");
+    default:
+      return new Error("Une erreur technique empêche l'envoi du message. Réessayez plus tard.");
+  }
+}
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -125,7 +163,7 @@ export function ChatInterface() {
   const [lastRecommandationsFilieres, setLastRecommandationsFilieres] = useState<FiliereRecoAffichage[]>([]);
   const [lastDominantLabel, setLastDominantLabel] = useState<string | undefined>(undefined);
   const [statsKey, setStatsKey] = useState(0); // pour rafraîchir la StatsCard
-  const [llmMode, setLlmMode] = useState(true); // true = LLM conversationnel (par défaut), false = NLU mots-clés
+  const [llmMode, setLlmMode] = useState(false); // true = LLM conversationnel, false = NLU mots-clés (par défaut)
   const [testInlineEnCours, setTestInlineEnCours] = useState<{ current: number; total: number } | null>(null);
   const [syntheseEnCours, setSyntheseEnCours] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -133,53 +171,6 @@ export function ChatInterface() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Initialisation au montage
-  useEffect(() => {
-    setMounted(true);
-    (async () => {
-      // Charger filières & métiers pour les selects + listes
-      try {
-        const [fr, mr] = await Promise.all([
-          fetch("/api/orientation/filieres"),
-          fetch("/api/orientation/metiers"),
-        ]);
-        if (fr.ok) setFilieres(await fr.json());
-        if (mr.ok) setMetiers(await mr.json());
-      } catch {
-        /* ignore */
-      }
-
-      // Restaurer contexte
-      const stored = typeof window !== "undefined"
-        ? localStorage.getItem(STORAGE_KEY)
-        : null;
-      if (stored) {
-        try {
-          const ctx = JSON.parse(stored) as StoredCtx;
-          const res = await fetch(`/api/orientation/init?utilisateurId=${ctx.utilisateurId}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.utilisateur && data.session) {
-              setUtilisateur(data.utilisateur);
-              setSession(data.session);
-              // Charger l'historique de la session
-              await chargerHistorique(data.session.id);
-              return;
-            }
-          }
-        } catch {
-          /* fallback ci-dessous */
-        }
-      }
-      // Sinon, init fresh
-      await initFresh();
-    })();
-  }, []);
-
-  useEffect(() => {
-    setDark(theme === "dark");
-  }, [theme]);
 
   const initFresh = useCallback(async () => {
     try {
@@ -202,7 +193,7 @@ export function ChatInterface() {
           id: uid(),
           role: "bot",
           content:
-            "Bonjour 👋 ! Je suis **OriensCI**, votre assistant d'orientation académique et professionnelle en Côte d'Ivoire.\n\n🤖 **Mode IA conversationnelle activé** — je comprends le langage naturel et je vous guide pas à pas. Vous pouvez me parler librement, je vous poserai des questions pour mieux vous connaître.\n\nPour commencer, dites-moi simplement : quel est votre **niveau d'études** et dans quelle **ville** êtes-vous ?",
+            "Bonjour 👋 ! Je suis **OriensCI**, votre assistant d'orientation académique et professionnelle en Côte d'Ivoire.\n\nLe mode classique est activé. Vous pouvez activer le mode IA conversationnelle avec le bouton « IA OFF » en haut de la page.\n\nPour commencer, dites-moi simplement : quel est votre **niveau d'études** et dans quelle **ville** êtes-vous ?",
           timestamp: new Date().toISOString(),
           actions: [
             { type: "suggestion", texte: "Je suis en Terminale", donnees: { message: "Je suis en terminale" } },
@@ -215,7 +206,7 @@ export function ChatInterface() {
     }
   }, []);
 
-  const chargerHistorique = async (sessionId: string) => {
+  const chargerHistorique = useCallback(async (sessionId: string) => {
     try {
       const res = await fetch(`/api/orientation/sessions?sessionId=${sessionId}`);
       if (!res.ok) return;
@@ -254,7 +245,59 @@ export function ChatInterface() {
     } catch {
       /* ignore */
     }
-  };
+  }, []);
+
+  // Initialisation au montage
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+    const bootstrap = async () => {
+      // Charger filières & métiers pour les selects + listes
+      try {
+        const [fr, mr] = await Promise.all([
+          fetch("/api/orientation/filieres"),
+          fetch("/api/orientation/metiers"),
+        ]);
+        if (fr.ok) setFilieres(await fr.json());
+        if (mr.ok) setMetiers(await mr.json());
+      } catch {
+        /* ignore */
+      }
+
+      const stored = typeof window !== "undefined"
+        ? localStorage.getItem(STORAGE_KEY)
+        : null;
+      let repriseImpossible = false;
+      if (stored) {
+        try {
+          const ctx = JSON.parse(stored) as StoredCtx;
+          const res = await fetch(`/api/orientation/init?utilisateurId=${ctx.utilisateurId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.utilisateur && data.session) {
+              setUtilisateur(data.utilisateur);
+              setSession(data.session);
+              await chargerHistorique(data.session.id);
+              return;
+            }
+          }
+          repriseImpossible = true;
+        } catch {
+          repriseImpossible = true;
+        }
+      }
+      if (repriseImpossible) {
+        toast("Cette ancienne session ne peut pas être vérifiée. Un nouveau profil sécurisé va être créé; les anciennes données ne sont pas supprimées.");
+      }
+      await initFresh();
+    };
+    void bootstrap();
+  }, [chargerHistorique, initFresh]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDark(theme === "dark");
+  }, [theme]);
 
   // Scroll auto vers le bas à chaque nouveau message
   useEffect(() => {
@@ -287,8 +330,8 @@ export function ChatInterface() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ utilisateurId: utilisateur.id, sessionId: session.id, message: msg, historique }),
         });
-        if (!res.ok) throw new Error();
-        const data = await res.json();
+        if (!res.ok) throw await getChatRequestError(res);
+        const data = await res.json() as LlmResponse;
         // Convertir les actions LLM en actions du frontend
         const actions: DialogueAction[] = (data.actions || []).map((a: { type: string; donnees?: Record<string, unknown> }) => {
           // Mapper les types LLM vers les types frontend
@@ -327,28 +370,29 @@ export function ChatInterface() {
         }
 
         // Si les scores ont été calculés (test terminé), afficher le dialog de résultats
-        if (data.scoresCalcules) {
+        const scoresCalcules = data.scoresCalcules;
+        if (scoresCalcules) {
           const userRes = await fetch(`/api/orientation/users?id=${utilisateur.id}`);
           const updatedUser = userRes.ok ? await userRes.json() : utilisateur;
-          const top3 = (Object.keys(data.scoresCalcules.scores) as Array<keyof typeof data.scoresCalcules.scores>)
-            .sort((a, b) => data.scoresCalcules.scores[b] - data.scoresCalcules.scores[a])
+          const top3 = [...RIASEC_ORDER]
+            .sort((a, b) => scoresCalcules.scores[b] - scoresCalcules.scores[a])
             .slice(0, 3)
             .map((k) => ({
               dim: k,
-              label: RIASEC_DIMENSIONS[k as RiasecDimension].label,
-              score: data.scoresCalcules!.scores[k],
-              description: RIASEC_DIMENSIONS[k as RiasecDimension].description,
+              label: RIASEC_DIMENSIONS[k].label,
+              score: scoresCalcules.scores[k],
+              description: RIASEC_DIMENSIONS[k].description,
             }));
           setLastTestResult({
             utilisateur: updatedUser,
-            scores: data.scoresCalcules.scores as Record<RiasecDimension, number>,
-            dominant: data.scoresCalcules.dominant as RiasecDimension,
-            dominantLabel: data.scoresCalcules.dominantLabel,
+            scores: scoresCalcules.scores,
+            dominant: scoresCalcules.dominant,
+            dominantLabel: scoresCalcules.dominantLabel,
             top3,
           });
-          setLastDominantLabel(data.scoresCalcules.dominantLabel);
+          setLastDominantLabel(scoresCalcules.dominantLabel);
           setTestInlineEnCours(null);
-          toast.success(`Test RIASEC terminé ! Profil dominant : ${data.scoresCalcules.dominantLabel}`);
+          toast.success(`Test RIASEC terminé ! Profil dominant : ${scoresCalcules.dominantLabel}`);
         }
 
         // Si la synthèse est en cours, déclencher la synthèse
@@ -409,7 +453,7 @@ export function ChatInterface() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ utilisateurId: utilisateur.id, sessionId: session.id, message: msg }),
         });
-        if (!res.ok) throw new Error();
+        if (!res.ok) throw await getChatRequestError(res);
         const data = await res.json();
         const botMsg: ChatMessage = {
           id: uid(),
@@ -426,8 +470,14 @@ export function ChatInterface() {
       const ur = await fetch(`/api/orientation/users?id=${utilisateur.id}`);
       if (ur.ok) setUtilisateur(await ur.json());
       setStatsKey((k) => k + 1); // rafraîchir les stats
-    } catch {
-      toast.error("Le message n'a pas pu être envoyé.");
+    } catch (error) {
+      toast.error(
+        error instanceof TypeError
+          ? "Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez."
+          : error instanceof Error
+            ? error.message
+            : "Le message n'a pas pu être envoyé.",
+      );
     } finally {
       setLoading(false);
     }
@@ -472,9 +522,11 @@ export function ChatInterface() {
     if (!utilisateur) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/orientation/recommendations?utilisateurId=${utilisateur.id}${session ? `&sessionId=${session.id}` : ""}`
-      );
+      const res = await fetch("/api/orientation/recommendations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ utilisateurId: utilisateur.id, sessionId: session?.id }),
+      });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.message ?? "Impossible de générer des recommandations.");
@@ -632,7 +684,7 @@ export function ChatInterface() {
       id: uid(),
       role: "bot",
       content:
-        `📋 Profil enregistré ! Niveau : **${u.niveauEtudes ?? "non précisé"}**, Filière : **${u.filiereActuelle?.nom ?? "non précisée"}**, Ville : **${u.localisation ?? "non précisée"}**.\n\nPour obtenir vos recommandations, passons maintenant le **test RIASEC** (≈ 3 min).`,
+        `📋 Profil enregistré ! Niveau : **${u.niveauEtudes ?? "non précisé"}**, Filière : **${u.serieTerminale ?? u.filiereActuelle?.nom ?? "non précisée"}**, Ville : **${u.localisation ?? "non précisée"}**.\n\nPour obtenir vos recommandations, passons maintenant le **test RIASEC** (≈ 3 min).`,
       timestamp: new Date().toISOString(),
       intention: "demarrage_profil",
       actions: [{ type: "proposer_test", texte: "Passer le test RIASEC" }],
@@ -752,9 +804,14 @@ export function ChatInterface() {
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-primary-foreground font-bold shadow-sm shrink-0">
-              <Compass className="h-5 w-5" />
-            </div>
+            <Image
+              src="/oriensci-avatar.png"
+              alt=""
+              aria-hidden="true"
+              width={72}
+              height={64}
+              className="h-9 w-auto shrink-0"
+            />
             <div className="min-w-0">
               <h1 className="font-bold text-[15px] leading-tight truncate">
                 OriensCI
@@ -895,9 +952,14 @@ export function ChatInterface() {
               {messages.length === 0 && (
                 <div className="h-full flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent text-primary-foreground shadow-md animate-pulse">
-                      <Compass className="h-6 w-6" />
-                    </div>
+                    <Image
+                      src="/oriensci-avatar.png"
+                      alt=""
+                      aria-hidden="true"
+                      width={72}
+                      height={64}
+                      className="h-12 w-auto animate-pulse"
+                    />
                     <p className="text-sm text-muted-foreground">Chargement d'OriensCI…</p>
                   </div>
                 </div>
@@ -1037,7 +1099,14 @@ export function ChatInterface() {
       <footer className="mt-auto border-t bg-background/95 backdrop-blur">
         <div className="mx-auto max-w-7xl px-3 sm:px-4 h-10 flex items-center justify-between text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <Compass className="h-3 w-3 text-primary" />
+            <Image
+              src="/oriensci-avatar.png"
+              alt=""
+              aria-hidden="true"
+              width={72}
+              height={64}
+              className="h-4 w-auto"
+            />
             <span className="font-medium text-foreground">OriensCI</span>
             <span className="hidden sm:inline">— Prototype de recherche · Modèle RIASEC de Holland</span>
             <span className="sm:hidden">· RIASEC</span>
@@ -1128,9 +1197,14 @@ export function ChatInterface() {
 
 function BotAvatar() {
   return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-primary-foreground shadow-sm">
-      <Compass className="h-4 w-4" />
-    </div>
+    <Image
+      src="/oriensci-avatar.png"
+      alt=""
+      aria-hidden="true"
+      width={36}
+      height={32}
+      className="h-8 w-9 shrink-0 object-contain"
+    />
   );
 }
 

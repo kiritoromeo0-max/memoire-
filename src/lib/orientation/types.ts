@@ -4,6 +4,7 @@ import type { RiasecDimension } from "@/lib/orientation/riasec-constants";
 export interface Utilisateur {
   id: string;
   niveauEtudes: string | null;
+  serieTerminale?: string | null;
   filiereActuelleId: string | null;
   filiereActuelle?: Filiere | null;
   filiereSouhaitee?: string | null;
@@ -39,7 +40,7 @@ export interface Filiere {
   etablissements?: string[];
   duree?: string | null;
   debouchesText?: string | null;
-  domaines?: string | null;
+  domaines?: string | string[] | null;
   metiers?: Metier[];
   // Pros/cons détaillés
   avantagesFinanciers?: string[];
