@@ -790,7 +790,7 @@ export function ChatInterface() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col app-bg">
+    <div className="h-[100dvh] min-h-0 flex flex-col overflow-hidden app-bg">
       {/* HEADER */}
       <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
         <div className="mx-auto max-w-7xl px-3 sm:px-4 h-14 flex items-center gap-3">
@@ -878,11 +878,19 @@ export function ChatInterface() {
       </header>
 
       {/* MAIN */}
-      <main className="flex-1 mx-auto w-full max-w-7xl px-3 sm:px-4 py-3 min-h-0">
-        <div className="grid lg:grid-cols-[280px_1fr] gap-3 h-[calc(100vh-3.5rem-2.5rem-1.5rem)]">
+      <main className="flex-1 mx-auto w-full max-w-7xl px-0 sm:px-4 py-0 sm:py-3 min-h-0">
+        <div className="grid lg:grid-cols-[280px_1fr] gap-0 sm:gap-3 h-full min-h-0">
           {/* SIDEBAR (desktop + drawer mobile) */}
+          {sidebarOpen && (
+            <button
+              type="button"
+              className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Fermer le menu"
+            />
+          )}
           <aside
-            className={`${sidebarOpen ? "block" : "hidden"} lg:block fixed lg:static inset-0 lg:inset-auto z-40 lg:z-auto bg-background lg:bg-transparent overflow-y-auto scroll-thin p-3 lg:p-0`}
+            className={`${sidebarOpen ? "block" : "hidden"} lg:block fixed lg:static inset-y-0 left-0 z-40 lg:z-auto w-[min(88vw,20rem)] lg:w-auto lg:inset-auto bg-background lg:bg-transparent overflow-y-auto scroll-thin p-3 lg:p-0 shadow-xl lg:shadow-none`}
           >
             <div className="flex items-center justify-between mb-2 lg:hidden">
               <span className="font-semibold text-sm">Menu</span>
@@ -943,11 +951,11 @@ export function ChatInterface() {
           </aside>
 
           {/* CHAT */}
-          <section className="flex flex-col rounded-xl border bg-card/60 overflow-hidden min-h-0 shadow-sm">
+          <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card/60 sm:rounded-xl sm:border sm:shadow-sm">
             {/* Messages */}
             <div
               ref={scrollRef}
-              className="flex-1 overflow-y-auto scroll-thin p-3 sm:p-4 space-y-3 min-h-0"
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain scroll-thin p-3 sm:p-4 space-y-3"
             >
               {messages.length === 0 && (
                 <div className="h-full flex items-center justify-center">
@@ -1018,24 +1026,24 @@ export function ChatInterface() {
             </div>
 
             {/* Quick actions mobile */}
-            <div className="lg:hidden border-t bg-background/50 px-2 py-1.5 flex gap-1 overflow-x-auto scroll-thin">
+            <nav aria-label="Actions rapides" className="lg:hidden shrink-0 border-t bg-background/50 px-2 py-2 flex gap-2 overflow-x-auto overscroll-x-contain scroll-thin">
               {quickActions.map((qa) => (
                 <button
                   key={qa.label}
                   onClick={qa.action}
-                  className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border bg-card whitespace-nowrap shrink-0"
+                  className="flex min-h-9 items-center gap-1.5 text-xs px-3 rounded-full border bg-card whitespace-nowrap shrink-0"
                 >
                   <qa.icon className={`h-3 w-3 ${qa.color}`} />
                   {qa.label}
                 </button>
               ))}
-            </div>
+            </nav>
 
             {/* Input */}
-            <div className="border-t bg-background/80 backdrop-blur p-2 sm:p-3 shrink-0">
+            <div className="shrink-0 border-t bg-background/90 backdrop-blur p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:p-3">
               {/* Indicateur de progression du test RIASEC inline */}
               {llmMode && testInlineEnCours && (
-                <div className="mb-2 px-2 py-1.5 rounded-md bg-primary/10 border border-primary/30 flex items-center gap-2 text-xs">
+                <div className="mb-2 px-2 py-1.5 rounded-md bg-primary/10 border border-primary/30 flex flex-wrap items-center gap-2 text-xs">
                   <Compass className="h-3.5 w-3.5 text-primary animate-pulse" />
                   <span className="font-medium text-primary">Test RIASEC en cours</span>
                   <span className="text-muted-foreground">— Question {testInlineEnCours.current}/{testInlineEnCours.total}</span>
@@ -1074,7 +1082,7 @@ export function ChatInterface() {
                       : "Posez votre question (filière, métier, débouchés, recommandation…)"
                   }
                   rows={1}
-                  className="min-h-[42px] max-h-32 resize-none text-sm"
+                  className="min-h-[42px] max-h-32 min-w-0 flex-1 resize-none text-base sm:text-sm"
                   disabled={loading || !utilisateur}
                 />
                 <Button
@@ -1096,7 +1104,7 @@ export function ChatInterface() {
       </main>
 
       {/* FOOTER (sticky) */}
-      <footer className="mt-auto border-t bg-background/95 backdrop-blur">
+      <footer className="mt-auto hidden shrink-0 border-t bg-background/95 backdrop-blur sm:block">
         <div className="mx-auto max-w-7xl px-3 sm:px-4 h-10 flex items-center justify-between text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <Image
@@ -1237,11 +1245,11 @@ function MessageRow({
   const time = new Date(message.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className={`flex items-end gap-2 msg-in ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex min-w-0 items-end gap-2 msg-in ${isUser ? "flex-row-reverse" : ""}`}>
       {isUser ? <UserAvatar /> : <BotAvatar />}
-      <div className={`max-w-[85%] sm:max-w-[75%] ${isUser ? "items-end" : "items-start"} flex flex-col gap-1.5`}>
+      <div className={`flex min-w-0 max-w-[calc(100%-2.5rem)] flex-col gap-1.5 sm:max-w-[75%] ${isUser ? "items-end" : "items-start"}`}>
         {/* Nom + horodatage */}
-        <div className={`flex items-center gap-1.5 text-[10px] text-muted-foreground ${isUser ? "flex-row-reverse" : ""}`}>
+        <div className={`flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground ${isUser ? "flex-row-reverse" : ""}`}>
           <span className="font-semibold">
             {isUser ? "Vous" : "OriensCI"}
           </span>
@@ -1254,7 +1262,7 @@ function MessageRow({
         </div>
 
         <div
-          className={`px-3 py-2 text-[13px] sm:text-sm leading-relaxed ${
+          className={`max-w-full break-words [overflow-wrap:anywhere] px-3 py-2 text-[13px] sm:text-sm leading-relaxed ${
             isUser ? "chat-bubble-user" : "chat-bubble-bot"
           }`}
         >
