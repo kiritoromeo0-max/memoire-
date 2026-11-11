@@ -15,6 +15,7 @@ import {
   type RiasecDimension,
 } from "./riasec-constants";
 import { CONSEILLER_CONTACTS } from "./conseiller-contacts";
+import { chargerObjectifsRetenus, extraireDeclarationObjectif } from "./objectifs";
 
 export interface DialogueInput {
   utilisateurId: string;
@@ -99,6 +100,65 @@ function profilEstRenseigne(profil: ProfilRiasec): boolean {
   return RIASEC_KEYS.some((k) => profil[k] > 0);
 }
 
+function extraireCorrectionProfil(
+  message: string,
+  utilisateur: {
+    niveauEtudes: string | null;
+    serieTerminale: string | null;
+    filiereActuelle?: { nom: string } | null;
+    filiereSouhaitee: string | null;
+    localisation: string | null;
+  },
+): { champ: "niveauEtudes" | "localisation" | "filiereSouhaitee" | "filiereActuelle"; valeur: string } | null {
+  const correctionMatch = message.match(
+    /\b(?:remplace(?:r)?|change(?:r)?|modifie(?:r)?|corrige(?:r)?)\s+(?:(?:mon|ma|mes)\s+)?(.+?)\s+(?:par|en|pour)\s+(.+?)\s*[.!?]*$/i,
+  );
+  const correctionCourteMatch = message.match(
+    /\b(?:change(?:r)?|modifie(?:r)?|corrige(?:r)?)\s+(?:(?:mon|ma|mes)\s+)?(?:niveau(?:\s+d['’]études)?|études|classe|ville|localisation|filière(?:\s+(?:actuelle|souhaitée))?)\s+(?:en|par|pour|à)\s+(.+?)\s*[.!?]*$/i,
+  );
+  const changementNiveauCourt = message.match(
+    /\b(?:change(?:r)?|modifie(?:r)?|corrige(?:r)?)\s+(?:en|pour|à)\s+(terminale|bac(?:calauréat)?(?:\s+obtenu)?|licence(?:\s+[1-3])?|master(?:\s+[1-2])?|doctorat)\s*[.!?]*$/i,
+  );
+  if (!correctionMatch && !correctionCourteMatch && !changementNiveauCourt) return null;
+
+  const description = correctionMatch?.[1].toLocaleLowerCase("fr") ?? message.toLocaleLowerCase("fr");
+  const valeur = (correctionMatch?.[2] ?? correctionCourteMatch?.[1] ?? changementNiveauCourt?.[1] ?? "").trim();
+  if (!valeur || valeur.length > 100) return null;
+
+  const ancienneValeur = correctionMatch?.[1].trim().toLocaleLowerCase("fr");
+  const ancienneValeurCorrespond = (valeurActuelle: string | null | undefined) =>
+    Boolean(valeurActuelle && ancienneValeur?.includes(valeurActuelle.toLocaleLowerCase("fr")));
+
+  if (
+    /\bniveau\b|\bétudes\b|\bclasse\b|\bterminale\b|\blicence\b|\bmaster\b|\bbac\b|\bdoctorat\b/i.test(description)
+    || ancienneValeurCorrespond(utilisateur.niveauEtudes)
+    || ancienneValeurCorrespond(utilisateur.serieTerminale)
+    || /^(?:terminale|bac(?:calauréat)?(?:\s+obtenu)?|licence(?:\s+[1-3])?|master(?:\s+[1-2])?|doctorat)$/i.test(valeur)
+  ) {
+    return { champ: "niveauEtudes", valeur };
+  }
+  if (
+    /\bville\b|\blocalisation\b/i.test(description)
+    || ancienneValeurCorrespond(utilisateur.localisation)
+  ) {
+    return { champ: "localisation", valeur };
+  }
+  if (
+    /\bfilière\s+souhaitée\b/i.test(description)
+    || ancienneValeurCorrespond(utilisateur.filiereSouhaitee)
+  ) {
+    return { champ: "filiereSouhaitee", valeur };
+  }
+  if (
+    /\bfilière\s+actuelle\b/i.test(description)
+    || ancienneValeurCorrespond(utilisateur.filiereActuelle?.nom)
+  ) {
+    return { champ: "filiereActuelle", valeur };
+  }
+
+  return null;
+}
+
 // Formatage d'une filière pour réponse
 function formaterFiliere(f: {
   nom: string;
@@ -161,6 +221,109 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
     };
   }
 
+  let objectifsRetenus = await chargerObjectifsRetenus(sessionId);
+  const objectifExprime = extraireDeclarationObjectif(message);
+  if (objectifExprime) {
+    if (!objectifsRetenus.some(
+      (objectif) => objectif.toLocaleLowerCase("fr") === objectifExprime.toLocaleLowerCase("fr"),
+    )) {
+      objectifsRetenus = [...objectifsRetenus, objectifExprime].slice(-8);
+    }
+    const reponseSysteme = `Merci de me le confier 😊 Si je comprends bien, vous souhaitez **${objectifExprime}**. Je le garde en tête pour la suite. Après votre test, je pourrai vous proposer des pistes en tenant compte de vos intérêts et de cet objectif, sans vous promettre qu'un métier ou une filière le garantit. Qu'est-ce qui compte le plus pour vous dans ce projet ?`;
+    const interaction = await db.interaction.create({
+      data: {
+        sessionId,
+        messageUtilisateur: message,
+        reponseSysteme,
+        metadata: JSON.stringify({ objectifsRetenus }),
+      },
+    });
+    return {
+      reponseSysteme,
+      intentionDetectee: "information_generale",
+      confidence: 1,
+      actions: [{ type: "texte", texte: reponseSysteme }],
+      interactionId: interaction.id,
+    };
+  }
+
+  const correction = extraireCorrectionProfil(message, utilisateur);
+  if (correction) {
+    let updateData: {
+      niveauEtudes?: string;
+      serieTerminale?: string | null;
+      filiereActuelleId?: string | null;
+      filiereSouhaitee?: string;
+      localisation?: string;
+    };
+
+    switch (correction.champ) {
+      case "niveauEtudes":
+        updateData = {
+          niveauEtudes: correction.valeur,
+          serieTerminale: null,
+          ...(correction.valeur === "Terminale" ? { filiereActuelleId: null } : {}),
+        };
+        break;
+      case "localisation":
+        updateData = { localisation: correction.valeur };
+        break;
+      case "filiereSouhaitee":
+        updateData = { filiereSouhaitee: correction.valeur };
+        break;
+      case "filiereActuelle": {
+        const filiere = await db.filiere.findFirst({
+          where: { nom: { equals: correction.valeur, mode: "insensitive" } },
+          select: { id: true },
+        });
+        if (!filiere) {
+          const reponseSysteme = `Je veux bien corriger votre filière 😊, mais je ne retrouve pas « ${correction.valeur} » dans la liste. Vous pouvez choisir la bonne filière avec le bouton ci-dessous.`;
+          const interaction = await db.interaction.create({
+            data: {
+              sessionId,
+              messageUtilisateur: message,
+              reponseSysteme,
+              metadata: JSON.stringify({ correctionProfil: "filiereActuelle", valeurIntrouvable: correction.valeur, objectifsRetenus }),
+            },
+          });
+          return {
+            reponseSysteme,
+            intentionDetectee: "demarrage_profil",
+            confidence: 1,
+            actions: [{ type: "demarrer_profil", texte: "Modifier mon profil" }],
+            interactionId: interaction.id,
+          };
+        }
+        updateData = { filiereActuelleId: filiere.id };
+        break;
+      }
+    }
+
+    await db.utilisateur.update({ where: { id: utilisateurId }, data: updateData });
+    const nomChamp = {
+      niveauEtudes: "niveau d'études",
+      localisation: "ville",
+      filiereSouhaitee: "filière souhaitée",
+      filiereActuelle: "filière actuelle",
+    }[correction.champ];
+    const reponseSysteme = `Bien sûr, merci de me l'avoir précisé 😊 J'ai corrigé votre **${nomChamp}** : **${correction.valeur}**. Vous pouvez faire ces changements directement ici, même sans activer le mode IA. On continue ensemble !`;
+    const interaction = await db.interaction.create({
+      data: {
+        sessionId,
+        messageUtilisateur: message,
+        reponseSysteme,
+        metadata: JSON.stringify({ correctionProfil: correction.champ, valeur: correction.valeur, objectifsRetenus }),
+      },
+    });
+    return {
+      reponseSysteme,
+      intentionDetectee: "demarrage_profil",
+      confidence: 1,
+      actions: [{ type: "texte", texte: reponseSysteme }],
+      interactionId: interaction.id,
+    };
+  }
+
   const ctx = await construireContexteNLU();
   const nlu: NluResult = analyserMessage(message, ctx);
 
@@ -174,8 +337,8 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
   switch (nlu.intent) {
     case "salutation": {
       reponseSysteme = profilDeBaseRenseigne
-        ? `Bonjour 👋 ! Ravi de vous revoir. Je suis **OriensCI**, votre assistant d'orientation. En quoi puis-je vous aider aujourd'hui ?`
-        : `Bonjour 👋 ! Je suis **OriensCI**, votre assistant d'orientation académique et professionnelle en Côte d'Ivoire.\n\nPour bien vous accompagner, je vous propose de commencer par créer votre profil (niveau d'études, filière actuelle, localisation) puis de passer le test RIASEC. Vous pouvez aussi me poser une question libre à tout moment.`;
+        ? `Bonjour 👋 ! Je suis **OriensCI**, ravi de faire votre connaissance 😊 Je suis là pour vous accompagner dans votre orientation, sans pression. Qu'est-ce qui vous ferait plaisir de découvrir aujourd'hui ?`
+        : `Bonjour 👋 et bienvenue ! Moi, c'est **OriensCI** 😊 Je suis là pour vous aider à trouver votre chemin, à votre rythme et sans jugement. On peut commencer par votre profil, puis faire le test RIASEC pour découvrir les pistes qui vous ressemblent. Vous pouvez aussi me parler librement de vos envies ou me poser vos questions.`;
       actions = [{ type: "texte", texte: reponseSysteme }];
       if (!profilDeBaseRenseigne) {
         actions.push({ type: "demarrer_profil", texte: "Créer mon profil" });
@@ -288,6 +451,9 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
       lignes.push(`🔹 **Niveau d'études** : ${utilisateur.niveauEtudes ?? "non renseigné"}`);
       lignes.push(`🔹 **Filière actuelle** : ${utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "non renseignée"}`);
       lignes.push(`🔹 **Localisation** : ${utilisateur.localisation ?? "non renseignée"}`);
+      if (objectifsRetenus.length > 0) {
+        lignes.push(`🔹 **Ce que vous m'avez confié** : ${objectifsRetenus.map((objectif) => `« ${objectif} »`).join(", ")}`);
+      }
       if (profilComplet) {
         lignes.push("");
         lignes.push("🧭 **Vos scores RIASEC** :");
@@ -314,7 +480,10 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
 
     case "demande_recommandation": {
       if (!profilComplet) {
-        reponseSysteme = "Pour générer des recommandations personnalisées, je dois d'abord connaître vos scores RIASEC. Passons le test !";
+        const objectifRappel = objectifsRetenus.length > 0
+          ? ` J'ai bien noté votre objectif : ${objectifsRetenus.map((objectif) => `« ${objectif} »`).join(", ")}. Je le garderai en tête pour mettre les résultats du test en perspective.`
+          : "";
+        reponseSysteme = `Pour vous proposer des pistes adaptées, j'ai d'abord besoin de vos résultats RIASEC.${objectifRappel} Faisons le test ensemble, puis je vous expliquerai comment les pistes correspondent à votre profil et à votre projet.`;
         actions = [
           { type: "texte", texte: reponseSysteme },
           { type: "proposer_test", texte: "Passer le test RIASEC" },
@@ -351,6 +520,12 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
         `🎯 Voici vos **${recos.length} métiers recommandés** + **${recosFilieres.length} filières compatibles** (profil dominant : **${RIASEC_DIMENSIONS[dom].label}**) :`,
         "",
       ];
+      if (objectifsRetenus.length > 0) {
+        lignes.unshift(
+          `Je me souviens de votre objectif : ${objectifsRetenus.map((objectif) => `« ${objectif} »`).join(", ")}. Ces pistes reflètent d'abord vos intérêts RIASEC; elles ne garantissent pas à elles seules cet objectif. On peut regarder ensemble comment les rapprocher de votre projet.`,
+          "",
+        );
+      }
       recos.forEach((r, i) => {
         lignes.push(`**${i + 1}. ${r.cible.nom}** — compatibilité **${Math.round(r.scoreCompatibilite * 100)}%**`);
         lignes.push(`   _${r.justification}_`);
@@ -596,7 +771,7 @@ export async function gererDialogue(input: DialogueInput): Promise<DialogueOutpu
       intentionId: intention?.id,
       messageUtilisateur: message,
       reponseSysteme,
-      metadata: JSON.stringify({ entities: nlu.entities, confidence: nlu.confidence }),
+      metadata: JSON.stringify({ entities: nlu.entities, confidence: nlu.confidence, objectifsRetenus }),
     },
   });
 

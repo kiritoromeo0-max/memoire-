@@ -193,9 +193,10 @@ export function ChatInterface() {
           id: uid(),
           role: "bot",
           content:
-            "Bonjour 👋 ! Je suis **OriensCI**, votre assistant d'orientation académique et professionnelle en Côte d'Ivoire.\n\nLe mode classique est activé. Vous pouvez activer le mode IA conversationnelle avec le bouton « IA OFF » en haut de la page.\n\nPour commencer, dites-moi simplement : quel est votre **niveau d'études** et dans quelle **ville** êtes-vous ?",
+            "Bonjour 👋 ! Je suis **OriensCI**, votre assistant d'aide à l'orientation. Je suis heureux de faire votre connaissance et de vous accompagner 😊\n\nJe peux vous aider à découvrir des filières et des métiers, répondre à vos questions, comprendre vos envies et vous guider avec votre profil et le test RIASEC. Vous pouvez me parler librement et corriger vos informations directement dans la conversation, même sans activer l'IA. Les bulles vertes sont simplement des suggestions facultatives.\n\nPour commencer, créons votre profil : il me permettra de mieux comprendre votre situation et de vous proposer des pistes qui vous ressemblent. Cliquez sur **« Créer mon profil »** juste en dessous, et nous avancerons ensemble, à votre rythme.",
           timestamp: new Date().toISOString(),
           actions: [
+            { type: "demarrer_profil", texte: "Créer mon profil" },
             { type: "suggestion", texte: "Je suis en Terminale", donnees: { message: "Je suis en terminale" } },
             { type: "suggestion", texte: "Je veux passer le test RIASEC", donnees: { message: "Je veux passer le test RIASEC" } },
           ],
@@ -237,8 +238,9 @@ export function ChatInterface() {
           id: uid(),
           role: "bot",
           content:
-            "Bonjour 👋 ! Je suis **OriensCI**. Reprenons votre orientation. Posez-moi une question ou créez votre profil.",
+            "Bonjour 👋 et bienvenue ! Moi, c'est **OriensCI** 😊 On peut avancer tranquillement, à votre rythme : compléter votre profil, puis faire le test RIASEC quand vous serez prêt. Vous pouvez me corriger ou changer une information directement dans cette conversation, même sans activer l'IA. Dites-moi aussi ce qui compte pour vous; je le garderai en tête pour vos recommandations. Les bulles vertes sont juste des idées pour vous aider.",
           timestamp: new Date().toISOString(),
+          actions: [{ type: "demarrer_profil", texte: "Créer mon profil" }],
         });
       }
       setMessages(msgs);
@@ -556,11 +558,17 @@ export function ChatInterface() {
       setLastRecommandationsFilieres(recosFilieres);
       setLastDominantLabel(data.dominantLabel);
       setStatsKey((k) => k + 1); // rafraîchir les stats
+      const objectifsRetenus = Array.isArray(data.objectifsRetenus)
+        ? data.objectifsRetenus.filter((objectif: unknown): objectif is string => typeof objectif === "string")
+        : [];
+      const contexteObjectifs = objectifsRetenus.length > 0
+        ? `Je me souviens de votre objectif : ${objectifsRetenus.map((objectif: string) => `« ${objectif} »`).join(", ")}. Ces suggestions reflètent d'abord vos intérêts RIASEC; elles ne garantissent pas à elles seules cet objectif. On peut regarder ensemble comment les rapprocher de votre projet.\n\n`
+        : "";
       const botMsg: ChatMessage = {
         id: uid(),
         role: "bot",
         content:
-          `🎯 Voici vos **${recos.length} métiers recommandés** + **${recosFilieres.length} filières compatibles** (profil dominant : **${data.dominantLabel}**). Cliquez sur un métier ou une filière pour en savoir plus.`,
+          `${contexteObjectifs}🎯 Voici vos **${recos.length} métiers recommandés** + **${recosFilieres.length} filières compatibles** (profil dominant : **${data.dominantLabel}**). Cliquez sur un métier ou une filière pour en savoir plus.`,
         timestamp: new Date().toISOString(),
         intention: "demande_recommandation",
         actions: [
@@ -713,9 +721,10 @@ export function ChatInterface() {
           id: uid(),
           role: "bot",
           content:
-            "🔄 **Nouvelle conversation démarrée**. Vos sessions précédentes sont conservées dans votre historique. Comment puis-je vous aider ?",
+            "😊 **Nouvelle conversation, on reprend ensemble !** Vos échanges précédents restent dans votre historique. On peut compléter votre profil, puis faire le test quand vous le souhaitez. Une information a changé ? Dites-le-moi ici, même sans activer l'IA. Les bulles vertes sont des suggestions, vous pouvez aussi m'écrire librement.",
           timestamp: new Date().toISOString(),
           actions: [
+            { type: "demarrer_profil", texte: "Créer mon profil" },
             { type: "suggestion", texte: "Voir mon profil", donnees: { message: "Montrez-moi mon profil" } },
             { type: "suggestion", texte: "Mes recommandations", donnees: { message: "Donnez-moi des recommandations personnalisées" } },
             { type: "suggestion", texte: "Voir l'historique", donnees: { message: "Je veux voir mon historique" } },
@@ -762,7 +771,7 @@ export function ChatInterface() {
           id: uid(),
           role: "bot",
           content:
-            "🔄 **Profil réinitialisé**. Bienvenue à nouveau sur OriensCI ! Pour bien vous accompagner, je vous propose de commencer par créer votre profil (niveau d'études, filière actuelle, localisation) puis de passer le test RIASEC.",
+            "🔄 **C'est reparti !** Bienvenue à nouveau 😊 On va reprendre votre orientation ensemble, à votre rythme : commençons par votre profil, puis vous pourrez faire le test RIASEC. Vous pouvez aussi me corriger directement dans la conversation, même sans activer l'IA. Les bulles vertes ne sont que des suggestions.",
           timestamp: new Date().toISOString(),
           actions: [
             { type: "demarrer_profil", texte: "Créer mon profil" },
@@ -1474,18 +1483,21 @@ function ActionRenderer({
 
       {/* Suggestion chips (quick replies) */}
       {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 max-w-md">
-          {suggestions.map((s, i) => (
-            <button
-              key={`sugg-${i}`}
-              type="button"
-              onClick={() => onAction(s)}
-              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-full border border-primary/40 bg-primary/5 text-primary hover:bg-primary hover:text-primary-foreground transition-all"
-            >
-              <MessageCircle className="h-3 w-3" />
-              {s.texte}
-            </button>
-          ))}
+        <div className="max-w-md space-y-1.5">
+          <p className="text-[10px] text-muted-foreground">Suggestions facultatives</p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((s, i) => (
+              <button
+                key={`sugg-${i}`}
+                type="button"
+                onClick={() => onAction(s)}
+                className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-full border border-green-300 bg-green-50 text-green-800 hover:bg-green-600 hover:text-white dark:border-green-800 dark:bg-green-950 dark:text-green-200 dark:hover:bg-green-700 transition-all"
+              >
+                <MessageCircle className="h-3 w-3" />
+                {s.texte}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </>

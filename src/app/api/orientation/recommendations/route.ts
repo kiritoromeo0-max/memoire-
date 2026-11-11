@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { recommander, profilDominant } from "@/lib/orientation/recommendation";
 import { RIASEC_DIMENSIONS, type RiasecDimension } from "@/lib/orientation/riasec-constants";
+import { chargerObjectifsRetenus } from "@/lib/orientation/objectifs";
 import { consumeRateLimit, rateLimitResponse, requireAuthenticatedUser, requireOwnedSession } from "@/lib/anonymous-auth";
 
 export async function POST(req: NextRequest) {
@@ -95,6 +96,9 @@ export async function POST(req: NextRequest) {
   });
 
   const dom = profilDominant(profil);
+  const objectifsRetenus = sessionId
+    ? await chargerObjectifsRetenus(sessionId)
+    : [];
 
   return NextResponse.json({
     profilComplet: true,
@@ -125,6 +129,7 @@ export async function POST(req: NextRequest) {
       scoreCompatibilite: r.scoreCompatibilite,
       justification: r.justification,
     })),
+    objectifsRetenus,
     sessionId: sessionIdFinal,
   });
 }

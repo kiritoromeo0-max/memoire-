@@ -60,6 +60,7 @@ async function chercherWeb(query: string, num = 4): Promise<WebSearchResult[]> {
 export interface LlmAction {
   type:
     | "profil_collecte"
+    | "objectif_retenu"
     | "test_riasec_question"
     | "test_riasec_termine"
     | "synthese_en_cours"
@@ -108,9 +109,10 @@ function buildSystemPrompt(params: {
   filieres: Array<{ nom: string; description: string | null; duree: string | null; domaines: string | null }>;
   metiers: Array<{ nom: string; secteurActivite: string | null; description: string | null }>;
   testEnCours: { current: number; reponses: Record<number, number> } | null;
+  objectifsRetenus: string[];
   scoresCalculesFlag?: boolean;
 }): string {
-  const { utilisateur, filieres, metiers, testEnCours, scoresCalculesFlag } = params;
+  const { utilisateur, filieres, metiers, testEnCours, objectifsRetenus, scoresCalculesFlag } = params;
   const profilComplet =
     utilisateur.scoreRealiste + utilisateur.scoreInvestigateur + utilisateur.scoreArtistique +
     utilisateur.scoreSocial + utilisateur.scoreEntreprenant + utilisateur.scoreConventionnel > 0;
@@ -135,6 +137,7 @@ function buildSystemPrompt(params: {
 - Filière actuelle : ${utilisateur.serieTerminale ?? utilisateur.filiereActuelle?.nom ?? "non renseignée"}
 - Filière souhaitée : ${utilisateur.filiereSouhaitee ?? "non renseignée"}
 - Localisation : ${utilisateur.localisation ?? "non renseignée"}
+- Objectifs et préoccupations exprimés : ${objectifsRetenus.length > 0 ? objectifsRetenus.map((objectif) => `« ${objectif} »`).join("; ") : "aucun pour le moment"}
 - Test RIASEC passé : ${profilComplet ? "OUI" : "NON"}
 ${profilComplet ? `- Scores : R=${utilisateur.scoreRealiste}/20, I=${utilisateur.scoreInvestigateur}/20, A=${utilisateur.scoreArtistique}/20, S=${utilisateur.scoreSocial}/20, E=${utilisateur.scoreEntreprenant}/20, C=${utilisateur.scoreConventionnel}/20
 - Profil dominant : ${utilisateur.profilDominant ?? "non calculé"}` : ""}
@@ -145,7 +148,9 @@ Le système a enregistré ${Object.keys(testEnCours.reponses).length} réponses.
 **Tu DOIS poser EXACTEMENT cette affirmation (question ${testEnCours.current}) :**
 "${RIASEC_QUESTIONS[testEnCours.current - 1]?.enonce ?? "ERREUR"}"
 
-Réponds en JSON avec :
+Si le message de l'utilisateur contient une correction de son profil, applique-la avec l'action "profil_collecte" (la nouvelle valeur remplace l'ancienne) tout en posant quand même cette question. S'il exprime un objectif, une préférence ou une préoccupation, garde-le avec l'action "objectif_retenu". Une correction ne compte comme réponse au test que si l'utilisateur donne clairement son niveau d'accord.
+
+Réponds en JSON avec l'action obligatoire "test_riasec_question". Si le message contient aussi une correction de profil ou un objectif/préoccupation, ajoute respectivement "profil_collecte" ou "objectif_retenu" dans le tableau "actions".
 - "reponse" : un court message de transition (ex: "Merci ! Voici la question ${testEnCours.current} :") SUIVI de l'affirmation exacte ci-dessus
 - "actions" : [{ "type": "test_riasec_question", "donnees": { "ordre": ${testEnCours.current}, "dimension": "${RIASEC_QUESTIONS[testEnCours.current - 1]?.dimension}", "enonce": "${RIASEC_QUESTIONS[testEnCours.current - 1]?.enonce}" } }]
 
@@ -157,7 +162,7 @@ Le test vient de se terminer. Les scores ont été calculés par le système :
 - R=${utilisateur.scoreRealiste}/20, I=${utilisateur.scoreInvestigateur}/20, A=${utilisateur.scoreArtistique}/20, S=${utilisateur.scoreSocial}/20, E=${utilisateur.scoreEntreprenant}/20, C=${utilisateur.scoreConventionnel}/20
 - Profil dominant : ${utilisateur.profilDominant}
 
-**Félicite l'utilisateur brièvement, puis dis-lui que tu vas maintenant synthétiser tous ses résultats.** Génère l'action "test_riasec_termine" et l'action "synthese_en_cours".
+**Félicite l'utilisateur brièvement, rappelle explicitement ses objectifs et préoccupations s'il en a exprimé, puis dis-lui que tu vas maintenant synthétiser ses résultats en tenant compte de ceux-ci.** Génère l'action "test_riasec_termine" et l'action "synthese_en_cours".
 ` : ""}
 
 # BASE DE CONNAISSANCES
@@ -185,10 +190,12 @@ ${metiersList}
 ${questionsRiasecList}
 
 **IMPORTANT** : Tu DOIS poser ces questions une par une, dans l'ordre (1, puis 2, puis 3... jusqu'à 30). Ne répète JAMAIS une question déjà posée. Ne saute JAMAIS de question. Ne reformule pas — pose l'affirmation exactement telle quelle (sans le préfixe [R] ou autre). Inclus l'énoncé complet dans ta réponse.
-5. **Digressions** : Si l'utilisateur dévie, réponds brièvement à sa question puis ramène-le avec douceur vers l'orientation ("Au fait, pour bien vous orienter...").
-6. **Recommandations** : Quand le test est terminé, propose de générer les recommandations.
-7. **Conseiller humain** : Si la demande dépasse tes capacités, propose la redirection vers un conseiller humain.
-8. **Recherche web (IMPORTANT)** : Si l'utilisateur pose une question factuelle qui nécessite des informations à jour ou que tu n'es pas sûr de la réponse (ex : dates de concours, salaires précis, établissements spécifiques, débouchés actuels, actualité), **DEMANDE UNE RECHERCHE WEB** en utilisant l'action "web_search". Le système effectuera la recherche sur internet et te renverra les résultats pour que tu puisse donner une réponse vérifiée et à jour. NE DONNE JAMAIS d'information factuelle dont tu n'es pas certain — demande plutôt une recherche web.
+5. **Corrections et liberté de modifier** : L'utilisateur peut corriger ou modifier directement dans la conversation une information déjà donnée (ex. « remplace Terminale par Master »). Mets immédiatement à jour le champ concerné avec "profil_collecte", sans demander de refaire son profil ni de confirmation, et confirme brièvement la modification. Les corrections restent possibles pendant le test.
+6. **Objectifs et préoccupations** : Repère les objectifs, envies, contraintes et inquiétudes de l'utilisateur, même exprimés naturellement ou pendant le test. Pour chaque nouvel élément, génère "objectif_retenu" avec donnees: { texte: string }. Si l'utilisateur corrige ou remplace un objectif déjà retenu, ajoute donnees.remplace avec le texte antérieur exact. Accuse réception avec empathie, sans promettre de résultat irréaliste. Garde ces éléments en mémoire jusqu'à la synthèse finale.
+7. **Guider sans tourner en rond** : Va droit au but et aide l'utilisateur à avancer vers la création de son profil puis le test RIASEC. Pose une seule question utile à la fois, évite les longues digressions et propose le test dès que les informations essentielles sont réunies.
+8. **Recommandations** : Après le test, génère une synthèse personnalisée qui relie explicitement les objectifs retenus aux résultats. Distingue clairement les pistes cohérentes avec le profil de celles qui répondent plutôt à l'objectif déclaré; si elles divergent, explique-le avec tact et propose des étapes ou alternatives réalistes. Ne prétends jamais qu'une filière garantit un objectif (par exemple devenir milliardaire).
+9. **Conseiller humain** : Si la demande dépasse tes capacités, propose la redirection vers un conseiller humain.
+10. **Recherche web (IMPORTANT)** : Si l'utilisateur pose une question factuelle qui nécessite des informations à jour ou que tu n'es pas sûr de la réponse (ex : dates de concours, salaires précis, établissements spécifiques, débouchés actuels, actualité), **DEMANDE UNE RECHERCHE WEB** en utilisant l'action "web_search". Le système effectuera la recherche sur internet et te renverra les résultats pour que tu puisse donner une réponse vérifiée et à jour. NE DONNE JAMAIS d'information factuelle dont tu n'es pas certain — demande plutôt une recherche web.
    - Exemples de questions nécessitant une recherche : "Quelle est la date du concours INP-HB ?", "Quel est le salaire d'un médecin en Côte d'Ivoire ?", "Quelles écoles proposent le génie civil à Abidjan ?", "Quels sont les débouchés de l'agronomie en 2025 ?"
    - Pour demander une recherche : action "web_search" avec donnees: { requete: "ta requête de recherche optimisée" }
    - Quand tu reçois les résultats de recherche, cite les sources (nom du site) dans ta réponse.
@@ -219,6 +226,7 @@ Tu DOIS répondre en JSON valide uniquement, avec cette structure exacte :
   - "toleranceStress" (string 1-5) : tolérance au stress (1=faible, 5=élevée)
   - "styleTravail" (string) : "solo", "equipe", ou "mixte"
   - **IMPORTANT** : Dès que l'utilisateur mentionne une de ces infos (même incidemment dans la conversation), génère l'action "profil_collecte" correspondante. Le profil se met à jour automatiquement. Ne demande pas confirmation — sauvegarde directement.
+- "objectif_retenu" : quand l'utilisateur exprime un objectif, une préférence, une contrainte ou une préoccupation à prendre en compte après le test. donnees: { texte: string, remplace?: string }. Utilise "remplace" si l'utilisateur corrige un objectif déjà retenu.
 - "test_riasec_question" : quand tu poses une question du test. donnees: { ordre: number (1-30), dimension: "R"|"I"|"A"|"S"|"E"|"C", enonce: string }
 - "test_riasec_termine" : quand les 30 questions sont répondues. donnees: {} (le système calculera les scores)
 - "recommandations_generees" : pour déclencher la génération de recommandations. donnees: {}
@@ -360,10 +368,18 @@ export async function gererChatLlm(input: LlmChatInput): Promise<LlmResponse> {
 
   let testState: { current: number; reponses: Record<number, number>; demarre: boolean } | null = null;
   let testTermine = false;
+  let objectifsRetenus: string[] = [];
   for (const it of lastInteractions.reverse()) {
     if (it.metadata) {
       try {
         const meta = JSON.parse(it.metadata);
+        if (Array.isArray(meta.objectifsRetenus)) {
+          objectifsRetenus = meta.objectifsRetenus
+            .filter((objectif: unknown): objectif is string => typeof objectif === "string")
+            .map((objectif: string) => objectif.trim().slice(0, 300))
+            .filter(Boolean)
+            .slice(-8);
+        }
         if (meta.testState) {
           testState = meta.testState;
         }
@@ -441,7 +457,14 @@ export async function gererChatLlm(input: LlmChatInput): Promise<LlmResponse> {
 
   // Build system prompt avec contexte de test mis à jour
   const testEnCoursPourPrompt = testState ? { current: testState.current, reponses: testState.reponses } : null;
-  const systemPrompt = buildSystemPrompt({ utilisateur: utilisateurFinal, filieres, metiers, testEnCours: testEnCoursPourPrompt, scoresCalculesFlag: !!scoresCalcules });
+  const systemPrompt = buildSystemPrompt({
+    utilisateur: utilisateurFinal,
+    filieres,
+    metiers,
+    testEnCours: testEnCoursPourPrompt,
+    objectifsRetenus,
+    scoresCalculesFlag: !!scoresCalcules,
+  });
 
   // Build messages array (system + history + current message)
   // Convert history to ChatMessage format
@@ -557,6 +580,25 @@ export async function gererChatLlm(input: LlmChatInput): Promise<LlmResponse> {
           if (ok) profilMisAJour = true;
         }
         finalActions.push(action);
+        break;
+      }
+      case "objectif_retenu": {
+        const texte = action.donnees?.texte;
+        if (typeof texte === "string" && texte.trim()) {
+          const nouvelObjectif = texte.trim().slice(0, 300);
+          const remplace = action.donnees?.remplace;
+          if (typeof remplace === "string" && remplace.trim()) {
+            const ancienObjectif = remplace.trim().toLocaleLowerCase("fr");
+            objectifsRetenus = objectifsRetenus.filter(
+              (objectif) => objectif.toLocaleLowerCase("fr") !== ancienObjectif,
+            );
+          }
+          if (!objectifsRetenus.some(
+            (objectif) => objectif.toLocaleLowerCase("fr") === nouvelObjectif.toLocaleLowerCase("fr"),
+          )) {
+            objectifsRetenus = [...objectifsRetenus, nouvelObjectif].slice(-8);
+          }
+        }
         break;
       }
       case "test_riasec_question": {
@@ -715,6 +757,7 @@ export async function gererChatLlm(input: LlmChatInput): Promise<LlmResponse> {
         testProgress: testProgress,
         testState: testState, // stocke l'état du test pour la prochaine requête
         testTermine: testTermine || !!scoresCalcules,
+        objectifsRetenus,
       }),
     },
   });
